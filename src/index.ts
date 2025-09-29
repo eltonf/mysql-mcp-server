@@ -25,7 +25,7 @@ const SERVER_VERSION = process.env.MCP_SERVER_VERSION || '1.0.0';
 const tools: Tool[] = [
   {
     name: 'get_schema',
-    description: 'Retrieves comprehensive schema information for specified tables including columns, data types, constraints, and relationships. Works on any SQL Server database without requiring stored procedures.',
+    description: 'Retrieves comprehensive schema information for one or more tables in a single efficient query. PREFERRED for batch operations - much faster than multiple get_table_info calls. Returns full table metadata including columns, data types, primary keys, foreign keys, indexes, and constraints. Example: tables=["Player", "PlayerAgent", "PlayerTeam"] gets all three tables in one query.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -36,7 +36,7 @@ const tools: Tool[] = [
         tables: {
           type: 'array',
           items: { type: 'string' },
-          description: 'List of table names to retrieve schema for (optional - if not provided, returns all tables)',
+          description: 'Array of table names to retrieve. For best performance with multiple tables, pass them all here instead of making separate calls. Leave empty to get all tables in schema.',
         },
         schema: {
           type: 'string',
@@ -59,7 +59,7 @@ const tools: Tool[] = [
   },
   {
     name: 'get_table_info',
-    description: 'Quick lookup for single table structure with column information. IMPORTANT: If you get an error about table not found, use validate_objects first to find the correct table name. Example: get table Player from LASSO database.',
+    description: 'Quick lookup for a single table. For multiple tables, use get_schema with tables array instead - it\'s much faster (one query vs N queries). IMPORTANT: If you get an error about table not found, use validate_objects first to find the correct table name.',
     inputSchema: {
       type: 'object',
       properties: {
