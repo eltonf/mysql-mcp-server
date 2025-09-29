@@ -6,7 +6,7 @@ All core functionality has been successfully implemented and the project builds 
 
 ## Key Improvements Made
 
-### 1. Enhanced SQL Procedures (queries/ directory)
+### 1. Enhanced SQL Procedures (sql/ directory)
 **GetSchemaMetadata.sql** - Superior version with:
 - ✅ Single JSON output (AI-parseable)
 - ✅ Batch query support (comma-separated table list)
@@ -37,8 +37,8 @@ All core functionality has been successfully implemented and the project builds 
 ### 3. Architecture Decisions
 
 **Chosen Approach:**
-- queries/GetSchemaMetadata.sql (JSON output) over sql/GetSchemaMetadata.sql (multiple recordsets)
-- queries/GetTableSchema.sql (scalar JSON function) over sql/fnGetTableSchema (table-valued)
+- sql/GetSchemaMetadata.sql (JSON output) - optimized single JSON response
+- sql/GetTableSchema.sql (scalar JSON function) - comprehensive metadata
 
 **Why:**
 1. Single JSON response = minimal parsing overhead
@@ -59,7 +59,7 @@ All core functionality has been successfully implemented and the project builds 
 ```
 sql-server-mcp-tools/
 ├── dist/                      # Compiled output ✅
-├── queries/                   # Optimized SQL (CHOSEN VERSION)
+├── sql/                       # SQL stored procedures & functions
 │   ├── GetSchemaMetadata.sql # Single JSON output ✅
 │   └── GetTableSchema.sql    # Scalar function returning JSON ✅
 ├── src/
@@ -117,8 +117,8 @@ sql-server-mcp-tools/
    USE [YourDatabase]
    GO
    
-   -- Run queries/GetSchemaMetadata.sql
-   -- Run queries/GetTableSchema.sql
+   -- Run sql/GetSchemaMetadata.sql
+   -- Run sql/GetTableSchema.sql
    ```
 4. Test connection: `npm start`
 
@@ -171,6 +171,6 @@ Add to Claude Desktop config (`claude_desktop_config.json`):
 
 ## Conclusion
 
-The implementation uses the superior `queries/` stored procedures that were created in your previous session. These procedures return single JSON results which are far more efficient and AI-friendly than the multiple recordset approach I initially created.
+The implementation uses optimized `sql/` stored procedures that return single JSON results, which are far more efficient and AI-friendly than multiple recordset approaches.
 
 All code compiles successfully and is ready for database deployment and testing.
