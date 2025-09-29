@@ -40,8 +40,7 @@ const tools: Tool[] = [
         },
         schema: {
           type: 'string',
-          description: 'Database schema name (default: "dbo")',
-          default: 'dbo',
+          description: 'Database schema name (optional). If not specified, will auto-detect schema. If table exists in multiple schemas, you will be asked to disambiguate.',
         },
         includeRelationships: {
           type: 'boolean',
@@ -73,8 +72,7 @@ const tools: Tool[] = [
         },
         schema: {
           type: 'string',
-          description: 'Database schema name (default: "dbo")',
-          default: 'dbo',
+          description: 'Database schema name (optional). If not specified, will search all schemas and auto-detect. If ambiguous, error will list all matches.',
         },
       },
       required: ['database', 'table'],
@@ -131,8 +129,7 @@ const tools: Tool[] = [
         },
         schema: {
           type: 'string',
-          description: 'Database schema name (default: "dbo")',
-          default: 'dbo',
+          description: 'Database schema name (optional). If not specified, will auto-detect schema.',
         },
       },
       required: ['database', 'fromTable'],
@@ -165,8 +162,7 @@ const tools: Tool[] = [
         },
         schema: {
           type: 'string',
-          description: 'Database schema name (default: "dbo")',
-          default: 'dbo',
+          description: 'Database schema name (optional). If not specified, will auto-detect schema.',
         },
       },
       required: ['database', 'description'],
@@ -188,7 +184,7 @@ const tools: Tool[] = [
         },
         schema: {
           type: 'string',
-          description: 'Schema name to validate (optional, default: "dbo")',
+          description: 'Schema name to validate (optional). If not specified, will search all schemas.',
         },
       },
       required: ['database'],

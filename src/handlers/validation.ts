@@ -125,6 +125,7 @@ export async function validateSchema(database: string, schema: string): Promise<
 /**
  * Validates if a table exists and provides smart suggestions
  * Handles partial matches, case insensitivity, and schema-qualified names
+ * When schema not specified, searches all schemas and handles disambiguation
  */
 export async function validateTable(
   database: string,
@@ -135,11 +136,13 @@ export async function validateTable(
     const query = `
       USE [${database}];
 
-      -- Try exact match first
+      -- Search for exact table name matches (with row counts for disambiguation)
       SELECT
         s.name AS SchemaName,
         t.name AS TableName,
-        s.name + '.' + t.name AS FullName
+        s.name + '.' + t.name AS FullName,
+        'TABLE' AS ObjectType,
+        (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = t.object_id AND p.index_id IN (0,1)) AS [RowCount]
       FROM sys.tables t
       INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
       WHERE
@@ -152,12 +155,16 @@ export async function validateTable(
       SELECT
         s.name AS SchemaName,
         v.name AS TableName,
-        s.name + '.' + v.name AS FullName
+        s.name + '.' + v.name AS FullName,
+        'VIEW' AS ObjectType,
+        NULL AS [RowCount]
       FROM sys.views v
       INNER JOIN sys.schemas s ON v.schema_id = s.schema_id
       WHERE
         (v.name = @tableName OR LOWER(v.name) = LOWER(@tableName))
         ${schema ? "AND (s.name = @schemaName OR LOWER(s.name) = LOWER(@schemaName))" : ""}
+
+      ORDER BY SchemaName, TableName
     `;
 
     const params: Record<string, any> = { tableName: table };
@@ -167,14 +174,36 @@ export async function validateTable(
 
     const result = await db.query(query, params);
 
-    if (result.recordset.length > 0) {
+    if (result.recordset.length === 1) {
+      // Exactly one match - use it automatically
       const match = result.recordset[0];
+      const schemaNote = !schema ? ` (auto-detected schema: ${match.SchemaName})` : '';
       return {
         exists: true,
         actualName: match.FullName,
         message: match.TableName === table
-          ? `Table '${match.FullName}' exists in database '${database}'`
-          : `Table found (case mismatch): '${match.FullName}' (you provided '${table}')`,
+          ? `Table '${match.FullName}' exists in database '${database}'${schemaNote}`
+          : `Table found (case mismatch): '${match.FullName}' (you provided '${table}')${schemaNote}`,
+      };
+    } else if (result.recordset.length > 1) {
+      // Multiple matches across different schemas - need disambiguation
+      const matches = result.recordset.map((row: any) => ({
+        schema: row.SchemaName,
+        table: row.TableName,
+        fullName: row.FullName,
+        type: row.ObjectType,
+        rowCount: row.RowCount,
+      }));
+
+      const matchList = matches
+        .map(m => `${m.fullName} (${m.type}${m.rowCount !== null ? `, ${m.rowCount} rows` : ''})`)
+        .join(', ');
+
+      return {
+        exists: false,
+        tables: matches,
+        suggestions: matches.map(m => m.fullName),
+        message: `Ambiguous: Table '${table}' exists in multiple schemas in database '${database}'. Please specify which one: ${matchList}`,
       };
     }
 
@@ -271,7 +300,7 @@ export async function validateDatabaseObject(
 
   // Step 2: Validate schema if provided
   let schemaValidation: SchemaValidation | undefined;
-  let actualSchema = schema || 'dbo';
+  let actualSchema: string | undefined = schema;
 
   if (schema) {
     schemaValidation = await validateSchema(actualDatabase, schema);
@@ -285,6 +314,8 @@ export async function validateDatabaseObject(
     }
     actualSchema = schemaValidation.actualName || schema;
   }
+  // Note: When schema not provided, actualSchema is undefined
+  // validateTable will search all schemas and auto-detect or require disambiguation
 
   // Step 3: Validate table if provided
   let tableValidation: TableValidation | undefined;

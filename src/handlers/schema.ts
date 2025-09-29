@@ -156,11 +156,25 @@ export async function getTableInfo(args: {
   try {
     // Use validated names (handles case mismatches)
     const actualDatabase = validation.database.actualName || database;
-    const actualSchema = validation.schema?.actualName || schema;
-    const actualTable = validation.table?.actualName || table;
+    const fullTableName = validation.table?.actualName || table;
+
+    // Parse schema and table name from validation result
+    // If validation returned "dbo.tblCollegeStats", split it
+    // If validation returned just "tblCollegeStats", use provided schema or undefined
+    let actualSchema: string;
+    let actualTable: string;
+
+    if (fullTableName.includes('.')) {
+      const parts = fullTableName.split('.');
+      actualSchema = parts[0];
+      actualTable = parts[1];
+    } else {
+      actualSchema = validation.schema?.actualName || schema || 'dbo';
+      actualTable = fullTableName;
+    }
 
     // Build inline SQL query
-    const query = buildGetTableSchemaQuery(actualDatabase, actualSchema, actualTable.split('.')[1] || actualTable);
+    const query = buildGetTableSchemaQuery(actualDatabase, actualSchema, actualTable);
 
     const result = await db.query(query);
 
