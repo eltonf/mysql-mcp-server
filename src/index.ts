@@ -14,6 +14,7 @@ import { getSchema, getTableInfo } from './handlers/schema.js';
 import { findTables } from './handlers/search.js';
 import { getRelationships } from './handlers/relationships.js';
 import { generateQuery } from './handlers/query.js';
+import { validateDatabaseObject } from './handlers/validation.js';
 
 config();
 
@@ -58,7 +59,7 @@ const tools: Tool[] = [
   },
   {
     name: 'get_table_info',
-    description: 'Quick lookup for single table structure with column information. Example: get table Players from LASSO database.',
+    description: 'Quick lookup for single table structure with column information. IMPORTANT: If you get an error about table not found, use validate_objects first to find the correct table name. Example: get table Player from LASSO database.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -171,6 +172,28 @@ const tools: Tool[] = [
       required: ['database', 'description'],
     },
   },
+  {
+    name: 'validate_objects',
+    description: 'Validates that database, schema, and table names exist. Provides helpful suggestions and fuzzy matching if names are misspelled, case is incorrect, or plural/singular. ALWAYS use this FIRST when you get "not found" errors from other tools. Example: if "Players" fails, this will suggest "Player".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name to validate (e.g., "LASSO", "PRISM")',
+        },
+        table: {
+          type: 'string',
+          description: 'Table name to validate (optional)',
+        },
+        schema: {
+          type: 'string',
+          description: 'Schema name to validate (optional, default: "dbo")',
+        },
+      },
+      required: ['database'],
+    },
+  },
 ];
 
 // Create server instance
@@ -259,12 +282,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'validate_objects': {
+        const result = await validateDatabaseObject(
+          (args as any).database,
+          (args as any).table,
+          (args as any).schema
+        );
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
-  } catch (error) {
+  } catch (error: any) {
     logger.error(`Error executing tool ${name}:`, error);
-    throw error;
+
+    // If error has validation details, return them in a user-friendly format
+    if (error.validation) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: error.message,
+              suggestions: error.validation.table?.suggestions || error.validation.database?.suggestions || [],
+              availableObjects: error.validation.table?.tables || error.validation.database?.databases || [],
+              validationDetails: error.validation
+            }, null, 2),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Return regular error
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Error: ${error.message || String(error)}`,
+        },
+      ],
+      isError: true,
+    };
   }
 });
 

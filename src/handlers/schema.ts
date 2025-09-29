@@ -2,6 +2,7 @@ import { db } from '../db/connection.js';
 import { cache } from '../db/cache.js';
 import { logger } from '../utils/logger.js';
 import { buildGetSchemaMetadataQuery, buildGetTableSchemaQuery } from '../db/queries.js';
+import { validateDatabaseObject } from './validation.js';
 
 // JSON-based interfaces matching the inline query output
 interface Column {
@@ -135,6 +136,16 @@ export async function getTableInfo(args: {
 }): Promise<TableMetadata> {
   const { database, table, schema = 'dbo' } = args;
 
+  // Validate the database and table exist first
+  const validation = await validateDatabaseObject(database, table, schema);
+
+  if (!validation.valid) {
+    // Return helpful error message with suggestions
+    const error: any = new Error(validation.message);
+    error.validation = validation;
+    throw error;
+  }
+
   const cacheKey = `table:${database}:${schema}:${table}`;
   const cached = cache.get<TableMetadata>(cacheKey);
   if (cached) {
@@ -143,13 +154,18 @@ export async function getTableInfo(args: {
   }
 
   try {
+    // Use validated names (handles case mismatches)
+    const actualDatabase = validation.database.actualName || database;
+    const actualSchema = validation.schema?.actualName || schema;
+    const actualTable = validation.table?.actualName || table;
+
     // Build inline SQL query
-    const query = buildGetTableSchemaQuery(database, schema, table);
+    const query = buildGetTableSchemaQuery(actualDatabase, actualSchema, actualTable.split('.')[1] || actualTable);
 
     const result = await db.query(query);
 
     if (!result.recordset[0]?.JsonResult) {
-      throw new Error(`Table ${schema}.${table} not found in database ${database}`);
+      throw new Error(`Table ${actualSchema}.${actualTable} not found in database ${actualDatabase}`);
     }
 
     // Parse the JSON result

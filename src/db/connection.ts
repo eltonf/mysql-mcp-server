@@ -28,7 +28,6 @@ class DatabaseConnection {
 
   private constructor() {
     const trustedConnection = process.env.DB_TRUSTED_CONNECTION === 'true';
-    const useKerberos = process.env.DB_USE_KERBEROS === 'true';
 
     this.config = {
       server: process.env.DB_SERVER || 'localhost',
@@ -44,18 +43,7 @@ class DatabaseConnection {
       },
     };
 
-    if (useKerberos) {
-      // Kerberos authentication (macOS/Linux with kinit)
-      // User must run: kinit username@DOMAIN.COM before starting
-      logger.info('Using Kerberos authentication (ensure kinit is active)');
-      (this.config as any).authentication = {
-        type: 'default', // Uses system Kerberos ticket
-      };
-      // Optionally set domain for connection string
-      if (process.env.DB_DOMAIN) {
-        (this.config as any).domain = process.env.DB_DOMAIN;
-      }
-    } else if (trustedConnection && process.env.DB_DOMAIN) {
+    if (trustedConnection && process.env.DB_DOMAIN) {
       // Windows NTLM authentication
       logger.info('Using Windows NTLM authentication');
       (this.config as any).domain = process.env.DB_DOMAIN;
@@ -73,9 +61,8 @@ class DatabaseConnection {
     } else {
       throw new Error(
         'Database authentication not configured properly. ' +
-        'Set either: DB_USE_KERBEROS=true (macOS), ' +
-        'DB_TRUSTED_CONNECTION=true with DB_DOMAIN (Windows), ' +
-        'or DB_USER/DB_PASSWORD (SQL Server auth)'
+        'Set either: DB_TRUSTED_CONNECTION=true with DB_DOMAIN (Windows NTLM), ' +
+        'or DB_USER/DB_PASSWORD (SQL Server auth - works on all platforms)'
       );
     }
   }
