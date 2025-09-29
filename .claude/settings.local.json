@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(DB_SERVER=ATTFBOPSDEVDB2 DB_USER=mcp_readonly DB_PASSWORD='godzop-1tudci-Wyxvat' node test_search.mjs)"
     ],
     "deny": [],
     "ask": []

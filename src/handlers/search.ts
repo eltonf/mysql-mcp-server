@@ -21,13 +21,21 @@ export async function findTables(args: {
     const query = buildFindTablesQuery(database, schema || null, pattern || null, hasColumn || null);
     const result = await db.query<TableSearchResult>(query);
 
-    // Parse JSON result if needed
+    // Parse JSON result - SQL Server returns JSON in various formats
     let tables: TableSearchResult[];
-    if (result.recordset.length === 1 && typeof result.recordset[0] === 'string') {
-      tables = JSON.parse(result.recordset[0] as any);
-    } else if (result.recordset.length === 1 && (result.recordset[0] as any).JSON_F52E2B61_18A1_11d1_B105_00805F49916B) {
-      // SQL Server returns JSON in a special column
-      tables = JSON.parse((result.recordset[0] as any).JSON_F52E2B61_18A1_11d1_B105_00805F49916B);
+    if (result.recordset.length === 0) {
+      tables = [];
+    } else if (result.recordset.length === 1) {
+      const row: any = result.recordset[0];
+      // Check for special JSON column name (SQL Server's default)
+      const jsonKey = Object.keys(row).find(k => k.startsWith('JSON_'));
+      if (jsonKey && typeof row[jsonKey] === 'string') {
+        tables = JSON.parse(row[jsonKey]);
+      } else if (typeof row === 'string') {
+        tables = JSON.parse(row);
+      } else {
+        tables = result.recordset;
+      }
     } else {
       tables = result.recordset;
     }

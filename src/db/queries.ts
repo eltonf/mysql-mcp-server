@@ -312,7 +312,7 @@ SELECT DISTINCT
   s.name AS schemaName,
   t.name AS tableName,
   t.create_date AS createDate,
-  p.rows AS rowCount
+  p.rows AS [rowCount]
 FROM sys.tables t
 INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
 LEFT JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)
