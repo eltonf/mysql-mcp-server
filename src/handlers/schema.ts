@@ -134,13 +134,31 @@ export async function getTableInfo(args: {
   table: string;
   schema?: string;
 }): Promise<TableMetadata> {
-  const { database, table, schema = 'dbo' } = args;
+  const { database, table, schema } = args;
 
   // Validate the database and table exist first
   const validation = await validateDatabaseObject(database, table, schema);
 
   if (!validation.valid) {
-    // Return helpful error message with suggestions
+    // Check if this is an ambiguity error (multiple schemas with same table)
+    if (validation.table && validation.table.suggestions && validation.table.suggestions.length > 1) {
+      // Return disambiguation info instead of throwing error
+      // This allows Claude to present options to the user
+      return {
+        schema: 'DISAMBIGUATION_REQUIRED',
+        name: table,
+        type: 'TABLE' as const,
+        columns: [],
+        indexes: [],
+        disambiguation: {
+          message: validation.message,
+          options: validation.table.tables || [],
+          suggestions: validation.table.suggestions,
+        },
+      } as any;
+    }
+
+    // For other validation errors (table not found, etc), throw error
     const error: any = new Error(validation.message);
     error.validation = validation;
     throw error;
