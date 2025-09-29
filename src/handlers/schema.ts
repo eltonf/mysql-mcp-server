@@ -142,20 +142,26 @@ export async function getTableInfo(args: {
   if (!validation.valid) {
     // Check if this is an ambiguity error (multiple schemas with same table)
     if (validation.table && validation.table.suggestions && validation.table.suggestions.length > 1) {
-      // Return disambiguation info instead of throwing error
-      // This allows Claude to present options to the user
-      return {
-        schema: 'DISAMBIGUATION_REQUIRED',
-        name: table,
-        type: 'TABLE' as const,
-        columns: [],
-        indexes: [],
-        disambiguation: {
-          message: validation.message,
-          options: validation.table.tables || [],
-          suggestions: validation.table.suggestions,
-        },
-      } as any;
+      // Throw error with strong language to prompt user interaction
+      const options = validation.table.tables || [];
+      const optionsList = options
+        .map((opt: any) => `  - ${opt.fullName}${opt.rowCount ? ` (${opt.rowCount.toLocaleString()} rows)` : ''}`)
+        .join('\n');
+
+      const errorMsg = `❌ AMBIGUOUS TABLE NAME - USER INPUT REQUIRED
+
+Table '${table}' exists in ${options.length} different schemas in database '${database}'.
+
+Please ask the user which table they want:
+
+${optionsList}
+
+DO NOT automatically query all versions. Ask the user: "Which schema do you want: ${options.map((o: any) => o.fullName).join(' or ')}?"`;
+
+      const error: any = new Error(errorMsg);
+      error.validation = validation;
+      error.isAmbiguous = true;
+      throw error;
     }
 
     // For other validation errors (table not found, etc), throw error
