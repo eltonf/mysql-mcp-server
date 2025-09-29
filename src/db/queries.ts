@@ -15,9 +15,12 @@ export function buildGetSchemaMetadataQuery(
   includeRelationships: boolean,
   includeStatistics: boolean
 ): string {
-  const tableFilter = tableNames && tableNames.length > 0
-    ? `AND t.name IN (${tableNames.map(t => `'${t.replace(/'/g, "''")}'`).join(',')})`
-    : '';
+  const tableNameList = tableNames && tableNames.length > 0
+    ? tableNames.map(t => `'${t.replace(/'/g, "''")}'`).join(',')
+    : null;
+
+  const tableFilter = tableNameList ? `AND t.name IN (${tableNameList})` : '';
+  const viewFilter = tableNameList ? `AND v.name IN (${tableNameList})` : '';
 
   return `
 USE [${database}];
@@ -43,7 +46,7 @@ WITH TableList AS (
   FROM sys.views v
   INNER JOIN sys.schemas s ON v.schema_id = s.schema_id
   WHERE s.name = '${schemaName.replace(/'/g, "''")}'
-  ${tableFilter}
+  ${viewFilter}
 )
 SELECT (
   SELECT
