@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { logger } from '../utils/logger.js';
+import { buildFindTablesQuery } from '../db/queries.js';
 
 interface TableSearchResult {
   schemaName: string;
@@ -9,58 +10,32 @@ interface TableSearchResult {
 }
 
 export async function findTables(args: {
+  database: string;
   pattern?: string;
   hasColumn?: string;
   schema?: string;
 }): Promise<TableSearchResult[]> {
-  const { pattern, hasColumn, schema } = args;
+  const { database, pattern, hasColumn, schema } = args;
 
   try {
-    let query = `
-      SELECT DISTINCT
-        s.name AS schemaName,
-        t.name AS tableName,
-        t.create_date AS createDate,
-        p.rows AS rowCount
-      FROM sys.tables t
-      INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-      LEFT JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)
-    `;
+    const query = buildFindTablesQuery(database, schema || null, pattern || null, hasColumn || null);
+    const result = await db.query<TableSearchResult>(query);
 
-    const conditions: string[] = [];
-    const params: Record<string, any> = {};
-
-    if (schema) {
-      conditions.push('s.name = @schema');
-      params.schema = schema;
+    // Parse JSON result if needed
+    let tables: TableSearchResult[];
+    if (result.recordset.length === 1 && typeof result.recordset[0] === 'string') {
+      tables = JSON.parse(result.recordset[0] as any);
+    } else if (result.recordset.length === 1 && (result.recordset[0] as any).JSON_F52E2B61_18A1_11d1_B105_00805F49916B) {
+      // SQL Server returns JSON in a special column
+      tables = JSON.parse((result.recordset[0] as any).JSON_F52E2B61_18A1_11d1_B105_00805F49916B);
+    } else {
+      tables = result.recordset;
     }
 
-    if (pattern) {
-      // Convert wildcards to SQL LIKE pattern
-      const sqlPattern = pattern.replace(/\*/g, '%').replace(/\?/g, '_');
-      conditions.push('t.name LIKE @pattern');
-      params.pattern = sqlPattern;
-    }
-
-    if (hasColumn) {
-      query += `
-        INNER JOIN sys.columns c ON t.object_id = c.object_id
-      `;
-      conditions.push('c.name = @columnName');
-      params.columnName = hasColumn;
-    }
-
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
-
-    query += ' ORDER BY s.name, t.name';
-
-    const result = await db.query<TableSearchResult>(query, params);
-    logger.info(`Found ${result.recordset.length} tables matching criteria`);
-    return result.recordset;
+    logger.info(`Found ${tables.length} tables matching criteria in ${database}`);
+    return tables;
   } catch (error) {
-    logger.error('Error finding tables:', error);
+    logger.error(`Error finding tables in ${database}:`, error);
     throw error;
   }
 }

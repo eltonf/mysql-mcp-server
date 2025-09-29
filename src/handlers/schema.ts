@@ -1,9 +1,9 @@
 import { db } from '../db/connection.js';
 import { cache } from '../db/cache.js';
 import { logger } from '../utils/logger.js';
-import sql from 'mssql';
+import { buildGetSchemaMetadataQuery, buildGetTableSchemaQuery } from '../db/queries.js';
 
-// New JSON-based interfaces matching the stored procedure output
+// JSON-based interfaces matching the inline query output
 interface Column {
   name: string;
   dataType: string;
@@ -64,19 +64,21 @@ interface SchemaResult {
 }
 
 export async function getSchema(args: {
+  database: string;
   tables?: string[];
   schema?: string;
   includeRelationships?: boolean;
   includeStatistics?: boolean;
 }): Promise<SchemaResult> {
   const {
+    database,
     tables,
     schema = 'dbo',
     includeRelationships = true,
     includeStatistics = false,
   } = args;
 
-  const cacheKey = `schema:${schema}:${tables?.join(',') || 'all'}:${includeRelationships}:${includeStatistics}`;
+  const cacheKey = `schema:${database}:${schema}:${tables?.join(',') || 'all'}:${includeRelationships}:${includeStatistics}`;
   const cached = cache.get<SchemaResult>(cacheKey);
   if (cached) {
     logger.info('Returning cached schema data');
@@ -84,24 +86,21 @@ export async function getSchema(args: {
   }
 
   try {
-    const pool = await db.connect();
-    const request = pool.request();
+    // Build inline SQL query
+    const query = buildGetSchemaMetadataQuery(
+      database,
+      schema,
+      tables || null,
+      includeRelationships,
+      includeStatistics
+    );
 
-    // Convert array to comma-separated string
-    const tableNames = tables && tables.length > 0 ? tables.join(',') : null;
+    const queryResult = await db.query(query);
 
-    request.input('TableNames', sql.NVarChar(sql.MAX), tableNames);
-    request.input('SchemaName', sql.NVarChar(128), schema);
-    request.input('IncludeRelationships', sql.Bit, includeRelationships ? 1 : 0);
-    request.input('IncludeSampleData', sql.Bit, 0); // Don't include sample data by default
-    request.input('IncludeStatistics', sql.Bit, includeStatistics ? 1 : 0);
-
-    const queryResult = await request.execute('dbo.GetSchemaMetadata');
-
-    // The stored procedure returns a single row with a JSON string
+    // The inline query returns a single row with a JSON string
     const jsonRow = queryResult.recordset[0];
     if (!jsonRow || !jsonRow.MetadataJson) {
-      logger.warn('No metadata returned from stored procedure');
+      logger.warn('No metadata returned from query');
       return { schema: [] };
     }
 
@@ -121,21 +120,22 @@ export async function getSchema(args: {
     }
 
     cache.set(cacheKey, result);
-    logger.info(`Retrieved schema for ${result.schema?.length || 0} tables`);
+    logger.info(`Retrieved schema for ${result.schema?.length || 0} tables from ${database}`);
     return result;
   } catch (error) {
-    logger.error('Error getting schema:', error);
+    logger.error(`Error getting schema from ${database}:`, error);
     throw error;
   }
 }
 
 export async function getTableInfo(args: {
+  database: string;
   table: string;
   schema?: string;
 }): Promise<TableMetadata> {
-  const { table, schema = 'dbo' } = args;
+  const { database, table, schema = 'dbo' } = args;
 
-  const cacheKey = `table:${schema}:${table}`;
+  const cacheKey = `table:${database}:${schema}:${table}`;
   const cached = cache.get<TableMetadata>(cacheKey);
   if (cached) {
     logger.info('Returning cached table info');
@@ -143,15 +143,13 @@ export async function getTableInfo(args: {
   }
 
   try {
-    // Use the scalar function which returns JSON
-    const query = `SELECT dbo.GetTableSchema(@SchemaName, @TableName) AS JsonResult`;
-    const result = await db.query(query, {
-      SchemaName: schema,
-      TableName: table,
-    });
+    // Build inline SQL query
+    const query = buildGetTableSchemaQuery(database, schema, table);
+
+    const result = await db.query(query);
 
     if (!result.recordset[0]?.JsonResult) {
-      throw new Error(`Table ${schema}.${table} not found`);
+      throw new Error(`Table ${schema}.${table} not found in database ${database}`);
     }
 
     // Parse the JSON result
@@ -169,10 +167,10 @@ export async function getTableInfo(args: {
     }
 
     cache.set(cacheKey, tableInfo);
-    logger.info(`Retrieved info for table ${schema}.${table}`);
+    logger.info(`Retrieved info for table ${database}.${schema}.${table}`);
     return tableInfo;
   } catch (error) {
-    logger.error('Error getting table info:', error);
+    logger.error(`Error getting table info from ${database}:`, error);
     throw error;
   }
 }

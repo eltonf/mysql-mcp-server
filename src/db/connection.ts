@@ -6,7 +6,6 @@ dotenvConfig();
 
 interface DBConfig {
   server: string;
-  database: string;
   user?: string;
   password?: string;
   domain?: string;
@@ -32,7 +31,6 @@ class DatabaseConnection {
 
     this.config = {
       server: process.env.DB_SERVER || 'localhost',
-      database: process.env.DB_DATABASE || 'master',
       options: {
         encrypt: true,
         trustServerCertificate: true,

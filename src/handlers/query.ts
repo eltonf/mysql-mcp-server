@@ -10,19 +10,20 @@ interface QueryGenerationResult {
 }
 
 export async function generateQuery(args: {
+  database: string;
   description: string;
   tables?: string[];
   outputFormat?: 'sql' | 'json';
   schema?: string;
 }): Promise<QueryGenerationResult> {
-  const { description, tables, schema = 'dbo' } = args;
+  const { database, description, tables, schema = 'dbo' } = args;
 
   try {
-    logger.info(`Generating query for: ${description}`);
+    logger.info(`Generating query for: ${description} in database ${database}`);
 
     // Get schema information for context (for future enhancement)
     if (tables && tables.length > 0) {
-      await getSchema({ tables, schema, includeRelationships: true });
+      await getSchema({ database, tables, schema, includeRelationships: true });
     }
 
     // Analyze the description to determine query type
@@ -30,7 +31,7 @@ export async function generateQuery(args: {
     const involvedTables = tables || extractTableNames(description);
 
     // Generate SQL based on description and context
-    const sqlQuery = await buildQuery(description, involvedTables, schema, queryType);
+    const sqlQuery = await buildQuery(description, involvedTables, database, schema, queryType);
 
     // Generate explanation
     const explanation = generateExplanation(sqlQuery, queryType, involvedTables);
@@ -87,6 +88,7 @@ function extractTableNames(description: string): string[] {
 async function buildQuery(
   description: string,
   tables: string[],
+  database: string,
   schema: string,
   queryType: string
 ): Promise<string> {
@@ -96,14 +98,17 @@ async function buildQuery(
 
   const mainTable = tables[0];
   let query = `-- Query: ${description}\n`;
+  query += `-- Database: ${database}\n`;
+  query += `USE [${database}];\n\n`;
   query += `SELECT *\n`;
-  query += `FROM ${schema}.${mainTable}\n`;
+  query += `FROM [${schema}].[${mainTable}]\n`;
 
   // Add JOINs if multiple tables
   if (tables.length > 1) {
     // Try to find relationships between tables
     try {
       const relationships = await getRelationships({
+        database,
         fromTable: mainTable,
         schema,
         maxDepth: tables.length,
@@ -116,7 +121,7 @@ async function buildQuery(
       logger.warn('Could not determine relationships for query generation');
       // Add basic joins without relationship info
       for (let i = 1; i < tables.length; i++) {
-        query += `-- JOIN ${schema}.${tables[i]} ON [specify join condition]\n`;
+        query += `-- JOIN [${schema}].[${tables[i]}] ON [specify join condition]\n`;
       }
     }
   }

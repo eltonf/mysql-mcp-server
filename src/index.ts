@@ -24,10 +24,14 @@ const SERVER_VERSION = process.env.MCP_SERVER_VERSION || '1.0.0';
 const tools: Tool[] = [
   {
     name: 'get_schema',
-    description: 'Retrieves comprehensive schema information for specified tables including columns, data types, constraints, and relationships.',
+    description: 'Retrieves comprehensive schema information for specified tables including columns, data types, constraints, and relationships. Works on any SQL Server database without requiring stored procedures.',
     inputSchema: {
       type: 'object',
       properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
         tables: {
           type: 'array',
           items: { type: 'string' },
@@ -49,14 +53,19 @@ const tools: Tool[] = [
           default: false,
         },
       },
+      required: ['database'],
     },
   },
   {
     name: 'get_table_info',
-    description: 'Quick lookup for single table structure with column information.',
+    description: 'Quick lookup for single table structure with column information. Example: get table Players from LASSO database.',
     inputSchema: {
       type: 'object',
       properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
         table: {
           type: 'string',
           description: 'Table name',
@@ -67,7 +76,7 @@ const tools: Tool[] = [
           default: 'dbo',
         },
       },
-      required: ['table'],
+      required: ['database', 'table'],
     },
   },
   {
@@ -76,6 +85,10 @@ const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
         pattern: {
           type: 'string',
           description: 'Table name pattern (supports * and ? wildcards)',
@@ -89,6 +102,7 @@ const tools: Tool[] = [
           description: 'Database schema name',
         },
       },
+      required: ['database'],
     },
   },
   {
@@ -97,6 +111,10 @@ const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
         fromTable: {
           type: 'string',
           description: 'Source table name',
@@ -116,7 +134,7 @@ const tools: Tool[] = [
           default: 'dbo',
         },
       },
-      required: ['fromTable'],
+      required: ['database', 'fromTable'],
     },
   },
   {
@@ -125,6 +143,10 @@ const tools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
         description: {
           type: 'string',
           description: 'Natural language description of the desired query',
@@ -146,7 +168,7 @@ const tools: Tool[] = [
           default: 'dbo',
         },
       },
-      required: ['description'],
+      required: ['database', 'description'],
     },
   },
 ];

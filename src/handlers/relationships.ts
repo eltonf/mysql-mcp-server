@@ -1,6 +1,7 @@
 import { db } from '../db/connection.js';
 import { cache } from '../db/cache.js';
 import { logger } from '../utils/logger.js';
+import { buildGetRelationshipsQuery } from '../db/queries.js';
 
 interface Relationship {
   fromSchema: string;
@@ -20,14 +21,15 @@ interface RelationshipPath {
 }
 
 export async function getRelationships(args: {
+  database: string;
   fromTable: string;
   toTable?: string;
   maxDepth?: number;
   schema?: string;
 }): Promise<RelationshipPath[]> {
-  const { fromTable, toTable, maxDepth = 2, schema = 'dbo' } = args;
+  const { database, fromTable, toTable, maxDepth = 2, schema = 'dbo' } = args;
 
-  const cacheKey = `relationships:${schema}:${fromTable}:${toTable || 'all'}:${maxDepth}`;
+  const cacheKey = `relationships:${database}:${schema}:${fromTable}:${toTable || 'all'}:${maxDepth}`;
   const cached = cache.get<RelationshipPath[]>(cacheKey);
   if (cached) {
     return cached;
@@ -35,7 +37,7 @@ export async function getRelationships(args: {
 
   try {
     // Get all foreign key relationships
-    const relationships = await getAllRelationships(schema);
+    const relationships = await getAllRelationships(database, schema);
 
     // Build relationship graph
     const paths: RelationshipPath[] = [];
@@ -66,32 +68,22 @@ export async function getRelationships(args: {
   }
 }
 
-async function getAllRelationships(schema: string): Promise<Relationship[]> {
-  const query = `
-    SELECT
-      s.name AS fromSchema,
-      t.name AS fromTable,
-      c.name AS fromColumn,
-      rs.name AS toSchema,
-      rt.name AS toTable,
-      rc.name AS toColumn,
-      fk.name AS constraintName,
-      fk.delete_referential_action_desc AS deleteAction,
-      fk.update_referential_action_desc AS updateAction
-    FROM sys.foreign_keys fk
-    INNER JOIN sys.tables t ON fk.parent_object_id = t.object_id
-    INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-    INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
-    INNER JOIN sys.columns c ON fkc.parent_object_id = c.object_id AND fkc.parent_column_id = c.column_id
-    INNER JOIN sys.tables rt ON fk.referenced_object_id = rt.object_id
-    INNER JOIN sys.schemas rs ON rt.schema_id = rs.schema_id
-    INNER JOIN sys.columns rc ON fkc.referenced_object_id = rc.object_id AND fkc.referenced_column_id = rc.column_id
-    WHERE s.name = @schema OR rs.name = @schema
-    ORDER BY t.name, fk.name
-  `;
+async function getAllRelationships(database: string, schema: string): Promise<Relationship[]> {
+  const query = buildGetRelationshipsQuery(database, schema);
+  const result = await db.query<Relationship>(query);
 
-  const result = await db.query<Relationship>(query, { schema });
-  return result.recordset;
+  // Parse JSON result if needed
+  let relationships: Relationship[];
+  if (result.recordset.length === 1 && typeof result.recordset[0] === 'string') {
+    relationships = JSON.parse(result.recordset[0] as any);
+  } else if (result.recordset.length === 1 && (result.recordset[0] as any).JSON_F52E2B61_18A1_11d1_B105_00805F49916B) {
+    // SQL Server returns JSON in a special column
+    relationships = JSON.parse((result.recordset[0] as any).JSON_F52E2B61_18A1_11d1_B105_00805F49916B);
+  } else {
+    relationships = result.recordset;
+  }
+
+  return relationships;
 }
 
 function findPaths(
