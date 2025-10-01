@@ -122,15 +122,6 @@ All tools now require `database` parameter:
    })
    ```
 
-5. **generate_query** - Natural language to SQL
-   ```javascript
-   generate_query({
-     database: "LASSO",
-     description: "Get all players from 2025 draft",
-     tables: ["Players"]
-   })
-   ```
-
 ## Next Steps
 
 ### Immediate

@@ -89,16 +89,6 @@ Map relationships between tables for JOIN path discovery.
 
 **Returns:** Graph of table relationships with JOIN conditions
 
-#### 5. `generate_query`
-Generate SQL from natural language (metadata only, no execution).
-
-**Parameters:**
-- `description`: string - Natural language query description
-- `tables`: string[] (optional) - Hint about relevant tables
-- `outputFormat`: string (optional) - "sql" or "json"
-
-**Returns:** Generated SQL query with explanation
-
 ## Project Structure
 
 sql-server-mcp-tools/
@@ -258,11 +248,6 @@ Find relationships:
 User: "How do I join Player to CollegeEvaluation?"
 Assistant: Let me find the relationship path between these tables.
 [Calls get_relationships tool]
-
-Generate query:
-User: "Write a query to get all evaluations for 2025 draft year"
-Assistant: I'll generate that SQL query for you.
-[Calls generate_query tool]
 
 Security Considerations
 
