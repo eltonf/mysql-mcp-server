@@ -18,7 +18,7 @@ import { findRoutines, getRoutineDefinition, getRoutinesSchema } from './handler
 
 config();
 
-const SERVER_NAME = process.env.MCP_SERVER_NAME || 'sql-server-tools';
+const SERVER_NAME = process.env.MCP_SERVER_NAME || 'sql-server-mcp';
 const SERVER_VERSION = process.env.MCP_SERVER_VERSION || '1.0.0';
 
 // Schema-only mode: when true, only schema/metadata tools are available

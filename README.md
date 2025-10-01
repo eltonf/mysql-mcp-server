@@ -124,9 +124,9 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 ```json
 {
   "mcpServers": {
-    "sql-server-tools": {
+    "sql-server-mcp": {
       "command": "node",
-      "args": ["/absolute/path/to/sql-server-mcp-tools/dist/index.js"],
+      "args": ["/absolute/path/to/sql-server-mcp/dist/index.js"],
       "env": {
         "DB_SERVER": "your-server.domain.com",
         "DB_USER": "mcp_readonly",
@@ -383,7 +383,7 @@ The `SCHEMA_ONLY_MODE` environment variable provides an additional safety layer:
 - `CACHE_TTL` - Cache time-to-live in seconds (default: 3600)
 - `CACHE_ENABLED` - Enable caching (default: true)
 - `LOG_LEVEL` - Logging level: error, warn, info, debug (default: info)
-- `MCP_SERVER_NAME` - Server name (default: sql-server-tools)
+- `MCP_SERVER_NAME` - Server name (default: sql-server-mcp)
 - `MCP_SERVER_VERSION` - Server version (default: 1.0.0)
 
 ## Contributing

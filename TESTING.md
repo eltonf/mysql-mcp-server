@@ -230,7 +230,7 @@ npx tsx test/handlers.test.ts
   "mcpServers": {
     "sql-server-tools": {
       "command": "node",
-      "args": ["/absolute/path/to/sql-server-mcp-tools/dist/index.js"],
+      "args": ["/absolute/path/to/sql-server-mcp/dist/index.js"],
       "env": {
         "DB_SERVER": "localhost",
         "DB_USER": "your_username",

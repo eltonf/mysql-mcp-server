@@ -1,5 +1,5 @@
 {
-  "name": "sql-server-mcp-tools",
+  "name": "sql-server-mcp",
   "version": "1.0.0",
   "description": "MCP server for SQL Server schema introspection and query generation",
   "main": "dist/index.js",
