@@ -13,7 +13,6 @@ import { logger } from './utils/logger.js';
 import { getSchema, getTableInfo } from './handlers/schema.js';
 import { findTables } from './handlers/search.js';
 import { getRelationships } from './handlers/relationships.js';
-import { generateQuery } from './handlers/query.js';
 import { validateDatabaseObject } from './handlers/validation.js';
 
 config();
@@ -136,39 +135,6 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'generate_query',
-    description: 'Generate SQL query from natural language description. Returns query template with explanation.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        database: {
-          type: 'string',
-          description: 'Database name (e.g., "LASSO", "PRISM")',
-        },
-        description: {
-          type: 'string',
-          description: 'Natural language description of the desired query',
-        },
-        tables: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Hint about relevant tables (optional)',
-        },
-        outputFormat: {
-          type: 'string',
-          enum: ['sql', 'json'],
-          description: 'Output format (default: "sql")',
-          default: 'sql',
-        },
-        schema: {
-          type: 'string',
-          description: 'Database schema name (optional). If not specified, will auto-detect schema.',
-        },
-      },
-      required: ['database', 'description'],
-    },
-  },
-  {
     name: 'validate_objects',
     description: 'Validates that database, schema, and table names exist. Provides helpful suggestions and fuzzy matching if names are misspelled, case is incorrect, or plural/singular. ALWAYS use this FIRST when you get "not found" errors from other tools. Example: if "Players" fails, this will suggest "Player".',
     inputSchema: {
@@ -180,7 +146,12 @@ const tools: Tool[] = [
         },
         table: {
           type: 'string',
-          description: 'Table name to validate (optional)',
+          description: 'Table name to validate (optional). Use either table or tables, not both.',
+        },
+        tables: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of table names to validate (optional). Use either table or tables, not both.',
         },
         schema: {
           type: 'string',
@@ -266,32 +237,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'generate_query': {
-        const result = await generateQuery(args as any);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      }
-
       case 'validate_objects': {
-        const result = await validateDatabaseObject(
-          (args as any).database,
-          (args as any).table,
-          (args as any).schema
-        );
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
+        const { database, table, tables, schema } = args as any;
+
+        // Handle both single table and array of tables
+        if (tables && Array.isArray(tables)) {
+          // Validate multiple tables
+          const results = await Promise.all(
+            tables.map((t: string) => validateDatabaseObject(database, t, schema))
+          );
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(results, null, 2),
+              },
+            ],
+          };
+        } else {
+          // Validate single table or just database/schema
+          const result = await validateDatabaseObject(database, table, schema);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
       }
 
       default:
