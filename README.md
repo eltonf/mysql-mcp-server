@@ -160,6 +160,9 @@ Ask Claude to query your databases:
 "Find all tables in PRISM that contain the word 'Team'"
 "Show me the relationships between Player and Team tables"
 "Validate that the Players table exists in LASSO"
+"Find all functions with 'Enhancement' in the name"
+"Get the definition of fnGetHighestEnhancementGradeValueByYear"
+"Show me all stored procedures in the dbo schema"
 ```
 
 ## Available MCP Tools
@@ -208,6 +211,46 @@ Validate database/schema/table names with fuzzy matching.
 - `database` (required) - Database name
 - `table` or `tables[]` (optional) - Table name(s) to validate
 - `schema` (optional) - Schema name
+
+### `find_routines`
+Search for stored procedures and functions by name pattern.
+
+**Parameters:**
+- `database` (required) - Database name
+- `pattern` (optional) - Wildcard pattern (e.g., `*Enhancement*`, `fn*`, `sp*`)
+- `type` (optional) - Filter by type: P=Procedure, FN=Scalar Function, IF/TF=Table Functions
+- `schema` (optional) - Filter by schema
+
+**Example:**
+```
+"Find all functions with 'Enhancement' in the name in LASSO database"
+```
+
+### `get_routine_definition`
+Get complete definition of a stored procedure or function including source code, parameters, and description.
+
+**Parameters:**
+- `database` (required) - Database name
+- `routine` (required) - Routine name (stored procedure or function)
+- `schema` (optional) - Schema name (auto-detected if omitted)
+
+**Example:**
+```
+"Get the definition of fnGetHighestEnhancementGradeValueByYear in LASSO"
+```
+
+### `get_routines_schema`
+Batch retrieval of multiple stored procedures/functions (preferred for multiple routines).
+
+**Parameters:**
+- `database` (required) - Database name
+- `routines` (optional) - Array of routine names (omit for all routines)
+- `schema` (optional) - Schema name (auto-detected if omitted)
+
+**Example:**
+```
+"Get definitions for spGetPlayer, spUpdatePlayer, and spDeletePlayer in LASSO"
+```
 
 ## Architecture
 

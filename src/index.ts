@@ -14,6 +14,7 @@ import { getSchema, getTableInfo } from './handlers/schema.js';
 import { findTables } from './handlers/search.js';
 import { getRelationships } from './handlers/relationships.js';
 import { validateDatabaseObject } from './handlers/validation.js';
+import { findRoutines, getRoutineDefinition, getRoutinesSchema } from './handlers/routines.js';
 
 config();
 
@@ -165,6 +166,78 @@ const tools: Tool[] = [
       required: ['database'],
     },
   },
+  {
+    name: 'find_routines',
+    description: 'Search for stored procedures and functions by name pattern. Returns list of routines with schema, type (PROCEDURE/SCALAR_FUNCTION/TABLE_FUNCTION), create/modify dates, and descriptions. Examples: pattern="*Enhancement*" finds all routines with "Enhancement" in name, type="FN" for scalar functions only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
+        pattern: {
+          type: 'string',
+          description: 'Routine name pattern using wildcards: * (any characters) or ? (single character). Examples: "*player*", "fn*", "sp*". Case-insensitive.',
+        },
+        type: {
+          type: 'string',
+          enum: ['P', 'FN', 'IF', 'TF', 'PC', 'X'],
+          description: 'Filter by routine type: P=Stored Procedure, FN=Scalar Function, IF=Inline Table Function, TF=Table Function, PC=CLR Procedure, X=Extended Procedure',
+        },
+        schema: {
+          type: 'string',
+          description: 'Filter by schema name (default: search all schemas)',
+        },
+      },
+      required: ['database'],
+    },
+  },
+  {
+    name: 'get_routine_definition',
+    description: 'Get complete definition of a stored procedure or function including source code, parameters, and description. IMPORTANT: If you get an error about routine not found, use find_routines first to search for the correct name. Example: Get definition of fnGetHighestEnhancementGradeValueByYear.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
+        routine: {
+          type: 'string',
+          description: 'Routine name (stored procedure or function)',
+        },
+        schema: {
+          type: 'string',
+          description: 'Database schema name (optional). If not specified, will search all schemas and auto-detect. If ambiguous, error will list all matches.',
+        },
+      },
+      required: ['database', 'routine'],
+    },
+  },
+  {
+    name: 'get_routines_schema',
+    description: 'Batch retrieval of multiple stored procedures and functions in a single efficient query. PREFERRED for multiple routines - much faster than multiple get_routine_definition calls. Returns full metadata including definitions, parameters, and descriptions. Example: routines=["spGetPlayer", "spUpdatePlayer", "spDeletePlayer"] gets all three in one query.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
+        routines: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of routine names to retrieve. For best performance with multiple routines, pass them all here instead of making separate calls. Leave empty to get all routines in schema.',
+        },
+        schema: {
+          type: 'string',
+          description: 'Database schema name (optional). If not specified, will auto-detect schema. If routines exist in multiple schemas, you will be asked to disambiguate.',
+        },
+      },
+      required: ['database'],
+    },
+  },
 
   // Future data query tools will be added here, conditionally based on SCHEMA_ONLY_MODE:
   // ...(!SCHEMA_ONLY_MODE ? [
@@ -276,6 +349,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ],
           };
         }
+      }
+
+      case 'find_routines': {
+        const result = await findRoutines(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_routine_definition': {
+        const result = await getRoutineDefinition(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_routines_schema': {
+        const result = await getRoutinesSchema(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
       }
 
       default:

@@ -55,10 +55,40 @@ The connection pool remains connected to `master` (default), but each query swit
 
 ### Schema Auto-Detection
 
-When `schema` parameter is omitted, queries check `INFORMATION_SCHEMA.TABLES` to find which schema contains the table:
+When `schema` parameter is omitted, queries check `INFORMATION_SCHEMA.TABLES` (for tables) or `sys.objects` (for routines) to find which schema contains the object:
 - If found in one schema: auto-select it
-- If found in multiple schemas: throw error with list of `schema.table` options, prompting user to specify
-- If not found: use validation handler to suggest similar table names
+- If found in multiple schemas: throw error with list of `schema.object` options, prompting user to specify
+- If not found: use validation handler to suggest similar names
+
+### Routine (Stored Procedure/Function) Introspection
+
+Routines are introspected using `sys.objects`, `sys.sql_modules`, and `sys.parameters`:
+
+**sys.objects types supported:**
+- `P` - Stored Procedure
+- `FN` - Scalar Function
+- `IF` - Inline Table-Valued Function
+- `TF` - Table-Valued Function
+- `PC` - CLR Stored Procedure
+- `X` - Extended Stored Procedure
+- `FS`/`FT` - CLR Functions
+
+**Query pattern for routine definitions:**
+```sql
+SELECT
+  o.name, o.type,
+  sm.definition AS source_code,  -- from sys.sql_modules
+  (SELECT p.name, TYPE_NAME(p.user_type_id), p.is_output
+   FROM sys.parameters p
+   WHERE p.object_id = o.object_id
+   FOR JSON PATH) AS parameters
+FROM sys.objects o
+LEFT JOIN sys.sql_modules sm ON o.object_id = sm.object_id
+WHERE o.type IN ('P', 'FN', 'IF', 'TF', ...)
+FOR JSON PATH
+```
+
+Handlers: `findRoutines()`, `getRoutineDefinition()`, `getRoutinesSchema()` in [src/handlers/routines.ts](src/handlers/routines.ts)
 
 ### Query Construction with FOR JSON
 
@@ -138,6 +168,25 @@ Validates database/schema/table names with fuzzy matching and suggestions.
 - Parameters: `database`, `table?` or `tables[]?`, `schema?`
 - Provides spelling suggestions, case corrections, plural/singular matches
 
+### find_routines
+Search for stored procedures and functions by name pattern.
+- Parameters: `database`, `pattern?`, `type?` (P/FN/IF/TF), `schema?`
+- Returns: List of routines with schema, type, create/modify dates, descriptions
+- Supports wildcards: `*` (any chars), `?` (single char)
+
+### get_routine_definition
+Get complete definition of a stored procedure or function.
+- Parameters: `database`, `routine`, `schema?`
+- Returns: Source code (from sys.sql_modules), parameters (from sys.parameters), description
+- Auto-detects schema if not specified
+- Example: Get definition of `fnGetHighestEnhancementGradeValueByYear`
+
+### get_routines_schema
+Batch retrieval of multiple routines' definitions in one query. PREFERRED over multiple `get_routine_definition` calls.
+- Parameters: `database`, `routines[]?`, `schema?`
+- Returns: Array of routine definitions with source code, parameters, descriptions
+- Leave `routines` empty to get all routines in schema
+
 ## Important Implementation Notes
 
 ### Schema vs DBO Default
@@ -201,8 +250,16 @@ Optional:
 ### Modifying SQL queries
 
 Edit `src/db/queries.ts` which contains query builder functions:
+
+**Table queries:**
 - `buildGetSchemaMetadataQuery()` - Multi-table batch schema query
 - `buildGetTableSchemaQuery()` - Single table schema query
+- `buildFindTablesQuery()` - Search tables by pattern
+
+**Routine queries:**
+- `buildFindRoutinesQuery()` - Search stored procedures/functions by pattern
+- `buildGetRoutineDefinitionQuery()` - Single routine with source code and parameters
+- `buildGetRoutinesSchemaQuery()` - Batch query for multiple routines
 
 These use complex nested `FOR JSON PATH` - be careful with aliasing and nesting levels.
 
@@ -289,7 +346,8 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed instructions.
 
 ## Recent Changes
 
+- **Routine introspection** (Oct 2025) - Added support for stored procedures and functions via `find_routines`, `get_routine_definition`, and `get_routines_schema` tools; uses `sys.objects`, `sys.sql_modules`, and `sys.parameters` for full metadata including source code and parameters
 - **Permission model** (Oct 2025) - Split setup scripts into Schema-Only and Full Access; added `SCHEMA_ONLY_MODE` environment variable for dual-layer security
 - **Removed `generate_query` tool** (Oct 2025) - was generating useless template queries; LLM clients should generate SQL directly using schema metadata from other tools
 - **Added `tables[]` array parameter** to `validate_objects` for batch validation
-- **Implemented smart schema auto-detection** with disambiguation for ambiguous tables
+- **Implemented smart schema auto-detection** with disambiguation for ambiguous tables and routines
