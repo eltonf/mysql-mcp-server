@@ -20,6 +20,10 @@ config();
 const SERVER_NAME = process.env.MCP_SERVER_NAME || 'sql-server-tools';
 const SERVER_VERSION = process.env.MCP_SERVER_VERSION || '1.0.0';
 
+// Schema-only mode: when true, only schema/metadata tools are available
+// This is enforced even if the database user has data read permissions
+const SCHEMA_ONLY_MODE = process.env.SCHEMA_ONLY_MODE === 'true';
+
 // Define available tools
 const tools: Tool[] = [
   {
@@ -161,6 +165,12 @@ const tools: Tool[] = [
       required: ['database'],
     },
   },
+
+  // Future data query tools will be added here, conditionally based on SCHEMA_ONLY_MODE:
+  // ...(!SCHEMA_ONLY_MODE ? [
+  //   { name: 'execute_query', description: 'Execute SELECT query', ... },
+  //   { name: 'get_sample_data', description: 'Get sample rows from table', ... },
+  // ] : []),
 ];
 
 // Create server instance
@@ -311,6 +321,13 @@ async function main() {
     // Test database connection
     await db.connect();
     logger.info('Database connection established');
+
+    // Log schema-only mode status
+    if (SCHEMA_ONLY_MODE) {
+      logger.info('SCHEMA_ONLY_MODE enabled - data query tools disabled');
+    } else {
+      logger.info('Full access mode - all tools available');
+    }
 
     // Start MCP server
     const transport = new StdioServerTransport();

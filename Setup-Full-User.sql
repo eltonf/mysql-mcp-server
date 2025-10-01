@@ -1,10 +1,13 @@
 /*******************************************************************************
- * SQL Server MCP User Setup Script
+ * SQL Server MCP Full Access User Setup Script
  *
- * Creates a read-only user for the MCP server with permissions to:
+ * Creates a FULL ACCESS user for the MCP server with permissions to:
  * - View database metadata and object definitions
- * - Read data from specified databases
+ * - Read data from specified databases (db_datareader role)
  * - Query system catalog views
+ *
+ * Use this script when you want both schema introspection AND data queries.
+ * For schema-only access (no data), use Setup-Schema-User.sql instead.
  *
  * This script is idempotent - safe to run multiple times.
  *
@@ -12,10 +15,10 @@
  * USAGE OPTION 1: SQLCMD (Command Line)
  *******************************************************************************
  *
- * sqlcmd -S your-server -E -i Setup-User.sql -v LoginName="mcp_readonly" Password="YourStrongPassword123!" DatabaseList="LASSO,PRISM,PRISMCollege"
+ * sqlcmd -S your-server -E -i Setup-Full-User.sql -v LoginName="mcp_full_access" Password="YourStrongPassword123!" DatabaseList="LASSO,PRISM,PRISMCollege"
  *
  * Or with SQL Auth:
- * sqlcmd -S your-server -U admin -P adminpass -i Setup-User.sql -v LoginName="mcp_readonly" Password="YourStrongPassword123!" DatabaseList="LASSO,PRISM"
+ * sqlcmd -S your-server -U admin -P adminpass -i Setup-Full-User.sql -v LoginName="mcp_full_access" Password="YourStrongPassword123!" DatabaseList="LASSO,PRISM"
  *
  *******************************************************************************
  * USAGE OPTION 2: SSMS / Azure Data Studio
@@ -28,14 +31,14 @@
 
 -- Uncomment this section for SQLCMD mode
 /*
-:setvar LoginName "mcp_readonly"
+:setvar LoginName "mcp_full_access"
 :setvar Password "YourStrongPassword123!"
 :setvar DatabaseList "LASSO,PRISM,PRISMCollege"
 */
 
 -- T-SQL version for SSMS/Azure Data Studio
 -- Edit these variables, then select all and execute
-DECLARE @LoginName NVARCHAR(128) = N'mcp_readonly';
+DECLARE @LoginName NVARCHAR(128) = N'mcp_full_access';
 DECLARE @Password NVARCHAR(128) = N'YourStrongPassword123!';
 DECLARE @DatabaseList NVARCHAR(MAX) = N'LASSO,PRISM,PRISMCollege'; -- Comma-separated list
 
@@ -47,9 +50,10 @@ SET NOCOUNT ON;
 
 PRINT '';
 PRINT '========================================';
-PRINT 'SQL Server MCP User Setup';
+PRINT 'SQL Server MCP Full Access User Setup';
 PRINT '========================================';
 PRINT 'Login: ' + @LoginName;
+PRINT 'Access Level: FULL (schema + data)';
 PRINT 'Databases: ' + @DatabaseList;
 PRINT '';
 
@@ -204,21 +208,32 @@ PRINT 'Setup Complete!';
 PRINT '========================================';
 PRINT '';
 PRINT 'Login: ' + @LoginName;
+PRINT 'Access Level: FULL ACCESS';
 PRINT '';
 PRINT 'Permissions granted:';
 PRINT '  • VIEW ANY DEFINITION (server-level)';
-PRINT '  • db_datareader role (per database)';
+PRINT '  • db_datareader role (per database) - allows data queries';
 PRINT '  • VIEW DEFINITION (per database)';
+PRINT '';
+PRINT 'This user can:';
+PRINT '  ✓ View table schemas, columns, data types';
+PRINT '  ✓ View foreign keys and relationships';
+PRINT '  ✓ View indexes and constraints';
+PRINT '  ✓ Search for tables and objects';
+PRINT '  ✓ Read data from tables (SELECT queries)';
 PRINT '';
 PRINT 'Databases configured:';
 
 SELECT DatabaseName FROM @Databases;
 
 PRINT '';
-PRINT 'Test connection with:';
+PRINT 'Configure MCP server with:';
 PRINT '  DB_SERVER=your-server';
 PRINT '  DB_USER=' + @LoginName;
 PRINT '  DB_PASSWORD=<your_password>';
+PRINT '  SCHEMA_ONLY_MODE=false  # Allow data query tools (when added)';
+PRINT '';
+PRINT 'For schema-only access, use Setup-Schema-User.sql instead.';
 PRINT '';
 
 /*******************************************************************************

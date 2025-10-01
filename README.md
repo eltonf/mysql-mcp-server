@@ -23,32 +23,61 @@ Model Context Protocol (MCP) server providing SQL Server schema introspection an
 
 ### 2. Setup Database User
 
-Run the included setup script to create a read-only user:
+Choose the appropriate setup script based on your security requirements:
 
-**Option A: SSMS / Azure Data Studio**
-1. Open `Setup-User.sql` in your SQL client
-2. Edit variables at top:
+#### Option A: Schema-Only Access (Recommended for Schema Introspection)
+
+Use `Setup-Schema-User.sql` when you **ONLY** want schema metadata without data access.
+
+**SSMS / Azure Data Studio:**
+1. Open `Setup-Schema-User.sql`
+2. Edit variables:
    ```sql
-   DECLARE @LoginName NVARCHAR(128) = N'mcp_readonly';
+   DECLARE @LoginName NVARCHAR(128) = N'mcp_schema_only';
    DECLARE @Password NVARCHAR(128) = N'YourPassword123!';
    DECLARE @DatabaseList NVARCHAR(MAX) = N'LASSO,PRISM,PRISMCollege';
    ```
-3. Select all (Ctrl+A) and execute (F5)
+3. Execute (F5)
 
-**Option B: Command Line (sqlcmd)**
+**Command Line:**
 ```bash
-sqlcmd -S your-server -E -i Setup-User.sql \
-  -v LoginName="mcp_readonly" \
+sqlcmd -S your-server -E -i Setup-Schema-User.sql \
+  -v LoginName="mcp_schema_only" \
      Password="YourPassword123!" \
      DatabaseList="LASSO,PRISM,PRISMCollege"
 ```
 
-The script will:
-- Create the login on the SQL Server instance
-- Grant `VIEW ANY DEFINITION` permission
-- Create users in specified databases
-- Grant `db_datareader` role and `VIEW DEFINITION` permissions
-- Validate databases exist and show status messages
+**Permissions granted:**
+- ✅ `VIEW ANY DEFINITION` (server-level)
+- ✅ `VIEW DEFINITION` (per database)
+- ❌ **NO** `db_datareader` (cannot read table data)
+
+#### Option B: Full Access (Schema + Data Queries)
+
+Use `Setup-Full-User.sql` when you want both schema metadata **AND** data queries.
+
+**SSMS / Azure Data Studio:**
+1. Open `Setup-Full-User.sql`
+2. Edit variables:
+   ```sql
+   DECLARE @LoginName NVARCHAR(128) = N'mcp_full_access';
+   DECLARE @Password NVARCHAR(128) = N'YourPassword123!';
+   DECLARE @DatabaseList NVARCHAR(MAX) = N'LASSO,PRISM,PRISMCollege';
+   ```
+3. Execute (F5)
+
+**Command Line:**
+```bash
+sqlcmd -S your-server -E -i Setup-Full-User.sql \
+  -v LoginName="mcp_full_access" \
+     Password="YourPassword123!" \
+     DatabaseList="LASSO,PRISM,PRISMCollege"
+```
+
+**Permissions granted:**
+- ✅ `VIEW ANY DEFINITION` (server-level)
+- ✅ `VIEW DEFINITION` (per database)
+- ✅ `db_datareader` (allows SELECT queries on data)
 
 ### 3. Install and Build
 
@@ -65,11 +94,20 @@ cp .env.example .env
 
 Edit `.env` with your SQL Server credentials:
 
-**SQL Server Authentication (all platforms):**
+**For Schema-Only Access:**
 ```env
 DB_SERVER=your-server.domain.com
-DB_USER=mcp_readonly
+DB_USER=mcp_schema_only
 DB_PASSWORD=YourPassword123!
+SCHEMA_ONLY_MODE=true  # Extra safety layer
+```
+
+**For Full Access:**
+```env
+DB_SERVER=your-server.domain.com
+DB_USER=mcp_full_access
+DB_PASSWORD=YourPassword123!
+SCHEMA_ONLY_MODE=false  # Allow data query tools when implemented
 ```
 
 **Windows NTLM (Windows only):**
@@ -230,7 +268,7 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed Kerberos setup instructions.
 **"Cannot open database"**
 - Verify database name is correct
 - Ensure user has been granted access to the database
-- Run Setup-User.sql to grant permissions
+- Run Setup-Schema-User.sql or Setup-Full-User.sql to grant permissions
 
 **Connection timeouts**
 - Check SQL Server is accessible: `ping your-server`
@@ -238,6 +276,32 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed Kerberos setup instructions.
 - For Kerberos: use FQDN for server name
 
 See [TESTING.md](TESTING.md) for detailed testing and troubleshooting information.
+
+## Permission Model
+
+This MCP server implements a dual-layer security model:
+
+### Database-Level Permissions (Primary Security)
+
+Two setup scripts provide different permission levels:
+
+| Script | User Type | VIEW DEFINITION | db_datareader | Use Case |
+|--------|-----------|-----------------|---------------|----------|
+| `Setup-Schema-User.sql` | Schema-Only | ✅ | ❌ | Schema introspection without data access |
+| `Setup-Full-User.sql` | Full Access | ✅ | ✅ | Schema + data queries (when implemented) |
+
+**Recommendation:** Start with `Setup-Schema-User.sql` for maximum security. Upgrade to `Setup-Full-User.sql` only when you need data query capabilities.
+
+### Application-Level Flag (Secondary Safety)
+
+The `SCHEMA_ONLY_MODE` environment variable provides an additional safety layer:
+
+- **`SCHEMA_ONLY_MODE=true`**: Data query tools are disabled in the MCP server (even if database permissions allow it)
+- **`SCHEMA_ONLY_MODE=false`**: Data query tools are available (if implemented and if database permissions allow)
+
+**Best Practice:** Combine both layers:
+- Schema-only: Use `mcp_schema_only` user + `SCHEMA_ONLY_MODE=true`
+- Full access: Use `mcp_full_access` user + `SCHEMA_ONLY_MODE=false`
 
 ## Environment Variables
 
@@ -247,6 +311,7 @@ See [TESTING.md](TESTING.md) for detailed testing and troubleshooting informatio
 
 **Optional:**
 - `DB_DOMAIN` - Domain for NTLM/Kerberos
+- `SCHEMA_ONLY_MODE` - Disable data query tools (default: false)
 - `CACHE_TTL` - Cache time-to-live in seconds (default: 3600)
 - `CACHE_ENABLED` - Enable caching (default: true)
 - `LOG_LEVEL` - Logging level: error, warn, info, debug (default: info)

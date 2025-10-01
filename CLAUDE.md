@@ -210,6 +210,64 @@ These use complex nested `FOR JSON PATH` - be careful with aliasing and nesting 
 
 Modify `src/db/connection.ts` constructor to add new auth methods or change config.
 
+## Permission Model and Access Control
+
+### Dual-Layer Security
+
+The server implements two security layers:
+
+**1. Database-Level Permissions (Primary)**
+
+Two setup scripts create users with different permissions:
+
+- **Setup-Schema-User.sql**: Creates `mcp_schema_only` user
+  - Grants: `VIEW ANY DEFINITION` (server), `VIEW DEFINITION` (per DB)
+  - Does NOT grant: `db_datareader`
+  - Can: Read schema metadata, view table structures, relationships
+  - Cannot: Read actual data from tables
+
+- **Setup-Full-User.sql**: Creates `mcp_full_access` user
+  - Grants: `VIEW ANY DEFINITION` (server), `VIEW DEFINITION` + `db_datareader` (per DB)
+  - Can: Everything schema-only can do PLUS read data from tables
+
+**2. Application-Level Flag (Secondary)**
+
+`SCHEMA_ONLY_MODE` environment variable in `src/index.ts`:
+
+```typescript
+const SCHEMA_ONLY_MODE = process.env.SCHEMA_ONLY_MODE === 'true';
+```
+
+When `true`, data query tools are not registered with the MCP server (even if DB permissions would allow it).
+
+### Future Data Query Tools
+
+When adding data query tools (e.g., `execute_query`, `get_sample_data`):
+
+1. Add tool definitions conditionally in `src/index.ts`:
+```typescript
+const tools: Tool[] = [
+  // ... existing schema tools ...
+
+  // Data query tools - only if not in schema-only mode
+  ...(!SCHEMA_ONLY_MODE ? [
+    { name: 'execute_query', description: '...', inputSchema: {...} },
+    { name: 'get_sample_data', description: '...', inputSchema: {...} },
+  ] : []),
+];
+```
+
+2. Add case handlers in the switch statement
+3. Create handler functions in `src/handlers/` directory
+4. Implement with safety checks (read-only, row limits, timeouts)
+
+### Best Practices
+
+- **Schema-only deployment**: Use `mcp_schema_only` user + `SCHEMA_ONLY_MODE=true`
+- **Full access deployment**: Use `mcp_full_access` user + `SCHEMA_ONLY_MODE=false`
+- **Never** give data read permissions to schema-only users - enforce at DB level
+- **Always** check `SCHEMA_ONLY_MODE` before registering new data query tools
+
 ## Common Pitfalls
 
 1. **Don't remove the `tables` parameter handling** from `validate_objects` - LLM clients expect to pass arrays
@@ -217,6 +275,7 @@ Modify `src/db/connection.ts` constructor to add new auth methods or change conf
 3. **Don't use `DB_DATABASE` in .env** - defeats the multi-database design
 4. **Don't forget `USE [database]` prefix** in all queries - required for database switching
 5. **Always use FQDN** for `DB_SERVER` when using Kerberos authentication
+6. **Don't grant `db_datareader` to schema-only users** - defeats the purpose of permission separation
 
 ## macOS Kerberos Setup
 
@@ -230,6 +289,7 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed instructions.
 
 ## Recent Changes
 
-- Removed `generate_query` tool (Oct 2025) - was generating useless template queries; LLM clients should generate SQL directly using schema metadata from other tools
-- Added `tables[]` array parameter to `validate_objects` for batch validation
-- Implemented smart schema auto-detection with disambiguation for ambiguous tables
+- **Permission model** (Oct 2025) - Split setup scripts into Schema-Only and Full Access; added `SCHEMA_ONLY_MODE` environment variable for dual-layer security
+- **Removed `generate_query` tool** (Oct 2025) - was generating useless template queries; LLM clients should generate SQL directly using schema metadata from other tools
+- **Added `tables[]` array parameter** to `validate_objects` for batch validation
+- **Implemented smart schema auto-detection** with disambiguation for ambiguous tables
