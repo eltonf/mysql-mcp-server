@@ -1,4 +1,4 @@
-# Testing SQL Server MCP Tools Locally
+# Testing SQL Server MCP Locally
 
 ## Prerequisites
 
@@ -228,7 +228,7 @@ npx tsx test/handlers.test.ts
 ```json
 {
   "mcpServers": {
-    "sql-server-tools": {
+    "sql-server-mcp": {
       "command": "node",
       "args": ["/absolute/path/to/sql-server-mcp/dist/index.js"],
       "env": {
@@ -443,7 +443,7 @@ Save this as `quick-test.sh`:
 ```bash
 #!/bin/bash
 
-echo "🧪 SQL Server MCP Tools - Quick Test"
+echo "🧪 SQL Server MCP - Quick Test"
 echo "===================================="
 echo ""
 
@@ -488,7 +488,7 @@ chmod +x quick-test.sh
 ## Example Test Output
 
 ```
-🧪 SQL Server MCP Tools - Quick Test
+🧪 SQL Server MCP - Quick Test
 ====================================
 
 📦 Building...
