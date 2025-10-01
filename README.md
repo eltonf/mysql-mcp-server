@@ -117,15 +117,6 @@ DB_TRUSTED_CONNECTION=true
 DB_DOMAIN=YOUR_DOMAIN
 ```
 
-**Kerberos (macOS/Linux):**
-```env
-DB_SERVER=your-server.domain.com  # Use FQDN
-DB_USE_KERBEROS=true
-DB_DOMAIN=YOUR_DOMAIN
-```
-
-For Kerberos, also run: `kinit username@DOMAIN.COM`
-
 ### 5. Configure Claude Desktop
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
@@ -254,11 +245,38 @@ Batch retrieval of multiple stored procedures/functions (preferred for multiple 
 
 ## Architecture
 
-- **Multi-database design**: Each tool call specifies which database to query via `USE [database]` statements
+### Core Design Principles
+
+1. **Database per request**: Connection string doesn't specify a database - each tool call specifies which database to query via `USE [database]` statements
+2. **Inline SQL with JSON**: All queries use SQL Server's `FOR JSON PATH` to return structured data in a single query, eliminating need for stored procedures
+3. **Schema auto-detection**: If schema isn't specified, automatically detects the schema a table belongs to; handles ambiguous cases by prompting user to specify
+4. **Fuzzy validation**: When objects aren't found, provides intelligent suggestions (case-insensitive, Levenshtein distance, plural/singular matching)
+5. **Singleton connection pool**: Single database connection pool reused across all requests, with automatic database switching per query
+
+### Key Features
+
+- **Multi-database design**: Query LASSO, then PRISM, then any other database - all from a single connection
 - **Inline JSON queries**: Uses SQL Server's `FOR JSON PATH` to return structured data in single queries
-- **Schema auto-detection**: Automatically finds which schema a table belongs to
-- **Singleton connection pool**: Reuses one connection pool, switching database context per query
-- **No database setup required**: No stored procedures or custom objects needed
+- **Schema auto-detection**: Automatically finds which schema a table/routine belongs to; prompts if ambiguous
+- **Singleton connection pool**: Reuses one connection pool, switching database context per query with `USE [database]`
+- **No database setup required**: No stored procedures or custom objects needed - works on any SQL Server
+- **Zero performance cost**: Database switching with `USE [database]` is effectively free in SQL Server
+- **System catalog views**: Universal queries work across all SQL Server databases
+
+### Database Switching Pattern
+
+All handlers use this pattern:
+```typescript
+// Build query with USE [database] prefix
+const query = `USE [${database}]; SELECT ...`;
+const result = await db.query(query);
+```
+
+The connection pool remains connected to `master` (default), but each query switches context. This enables:
+- Query multiple databases from single connection
+- No connection overhead per database
+- Same performance as stored procedures
+- Works on any SQL Server without setup
 
 See [CLAUDE.md](CLAUDE.md) for detailed architecture documentation.
 
@@ -283,19 +301,27 @@ npm start
 
 ## Authentication Setup
 
-### SQL Server Authentication
+### SQL Server Authentication (Recommended)
 Works on all platforms. Set `DB_USER` and `DB_PASSWORD` in `.env`.
 
-### Windows NTLM
-Windows only. Set `DB_TRUSTED_CONNECTION=true` and `DB_DOMAIN`.
+**Example:**
+```env
+DB_SERVER=your-server.domain.com
+DB_USER=mcp_schema_only
+DB_PASSWORD=YourPassword123!
+```
 
-### Kerberos (macOS/Linux)
-1. Configure `~/.krb5.conf` with your domain
-2. Run `kinit username@DOMAIN.COM`
-3. Set `DB_USE_KERBEROS=true` and `DB_DOMAIN`
-4. Use FQDN for `DB_SERVER`
+### Windows NTLM (Windows Only)
+Only available on Windows machines. Set `DB_TRUSTED_CONNECTION=true` and `DB_DOMAIN`.
 
-See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed Kerberos setup instructions.
+**Example:**
+```env
+DB_SERVER=your-server.domain.com
+DB_TRUSTED_CONNECTION=true
+DB_DOMAIN=YOUR_DOMAIN
+```
+
+**Note:** The mssql npm package (using tedious driver) does not support Kerberos authentication on macOS/Linux. Use SQL Server authentication instead.
 
 ## Troubleshooting
 
@@ -316,7 +342,6 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed Kerberos setup instructions.
 **Connection timeouts**
 - Check SQL Server is accessible: `ping your-server`
 - Verify firewall allows port 1433
-- For Kerberos: use FQDN for server name
 
 See [TESTING.md](TESTING.md) for detailed testing and troubleshooting information.
 
@@ -380,5 +405,5 @@ MIT
 
 For issues and questions, see:
 - [TESTING.md](TESTING.md) - Testing and troubleshooting guide
-- [MACOS_SETUP.md](MACOS_SETUP.md) - macOS Kerberos setup
 - [AUTHENTICATION.md](AUTHENTICATION.md) - Authentication details
+- [CLAUDE.md](CLAUDE.md) - Architecture and development guidance
