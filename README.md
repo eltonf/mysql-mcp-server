@@ -328,7 +328,7 @@ DB_DOMAIN=YOUR_DOMAIN
 **"Login failed for user"**
 - Verify credentials in `.env`
 - Check that user has access to the database
-- For Kerberos: verify ticket with `klist`
+- Verify SQL Server allows SQL authentication (not Windows-only mode)
 
 **"Table not found"**
 - Use `validate_objects` tool to check spelling and get suggestions
