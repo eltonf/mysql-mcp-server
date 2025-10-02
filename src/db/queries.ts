@@ -304,27 +304,34 @@ export function buildFindTablesQuery(
   const patternFilter = pattern
     ? `AND t.name LIKE '${pattern.replace(/\*/g, '%').replace(/\?/g, '_').replace(/'/g, "''")}'`
     : '';
+  const columnFilter = hasColumn
+    ? `AND c.name LIKE '${hasColumn.replace(/\*/g, '%').replace(/\?/g, '_').replace(/'/g, "''")}'`
+    : '';
   const columnJoin = hasColumn
-    ? `INNER JOIN sys.columns c ON t.object_id = c.object_id AND c.name = '${hasColumn.replace(/'/g, "''")}'`
+    ? `INNER JOIN sys.columns c ON t.object_id = c.object_id`
     : '';
 
   return `
 USE [${database}];
 
-SELECT DISTINCT
-  s.name AS schemaName,
-  t.name AS tableName,
-  t.create_date AS createDate,
-  p.rows AS [rowCount]
-FROM sys.tables t
-INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-LEFT JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)
-${columnJoin}
-WHERE 1=1
-${schemaFilter}
-${patternFilter}
-ORDER BY s.name, t.name
-FOR JSON PATH;
+SELECT (
+  SELECT
+    s.name AS schemaName,
+    t.name AS tableName,
+    t.create_date AS createDate,
+    MAX(p.rows) AS [rowCount]
+  FROM sys.tables t
+  INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+  LEFT JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)
+  ${columnJoin}
+  WHERE 1=1
+  ${schemaFilter}
+  ${patternFilter}
+  ${columnFilter}
+  GROUP BY s.name, t.name, t.create_date
+  ORDER BY s.name, t.name
+  FOR JSON PATH
+) AS JsonResult;
 `;
 }
 

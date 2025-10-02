@@ -19,26 +19,16 @@ export async function findTables(args: {
 
   try {
     const query = buildFindTablesQuery(database, schema || null, pattern || null, hasColumn || null);
-    const result = await db.query<TableSearchResult>(query);
+    const result = await db.query(query);
 
-    // Parse JSON result - SQL Server returns JSON in various formats
-    let tables: TableSearchResult[];
-    if (result.recordset.length === 0) {
-      tables = [];
-    } else if (result.recordset.length === 1) {
-      const row: any = result.recordset[0];
-      // Check for special JSON column name (SQL Server's default)
-      const jsonKey = Object.keys(row).find(k => k.startsWith('JSON_'));
-      if (jsonKey && typeof row[jsonKey] === 'string') {
-        tables = JSON.parse(row[jsonKey]);
-      } else if (typeof row === 'string') {
-        tables = JSON.parse(row);
-      } else {
-        tables = result.recordset;
-      }
-    } else {
-      tables = result.recordset;
+    // Parse JSON result - SQL Server returns JSON as JsonResult column
+    const jsonRow: any = result.recordset[0];
+    if (!jsonRow?.JsonResult) {
+      logger.info('No tables found matching criteria');
+      return [];
     }
+
+    const tables: TableSearchResult[] = JSON.parse(jsonRow.JsonResult);
 
     logger.info(`Found ${tables.length} tables matching criteria in ${database}`);
     return tables;

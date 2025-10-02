@@ -149,6 +149,7 @@ Ask Claude to query your databases:
 ```
 "Get the schema for the Player table in LASSO database"
 "Find all tables in PRISM that contain the word 'Team'"
+"Find all tables that have a column with 'redshirt' in the name"
 "Show me the relationships between Player and Team tables"
 "Validate that the Players table exists in LASSO"
 "Find all functions with 'Enhancement' in the name"
@@ -181,9 +182,11 @@ Search tables by name pattern or column name.
 
 **Parameters:**
 - `database` (required) - Database name
-- `pattern` (optional) - Wildcard pattern (e.g., `*player*`, `tbl*`)
-- `hasColumn` (optional) - Find tables with specific column
+- `pattern` (optional) - Wildcard pattern for table names (e.g., `*player*`, `tbl*`)
+- `hasColumn` (optional) - Wildcard pattern for column names (e.g., `*redshirt*`, `ID`)
 - `schema` (optional) - Filter by schema
+
+**Wildcards:** Use `*` for multiple characters, `?` for single character
 
 ### `get_relationships`
 Discover foreign key relationships between tables.

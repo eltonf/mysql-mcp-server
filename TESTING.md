@@ -197,8 +197,16 @@ async function testHandlers() {
     });
     console.log('✅ Found', tables.length, 'tables matching pattern');
 
-    // Test 4: Switch databases
-    console.log('\n📋 Test 4: Switch to PRISM database');
+    // Test 4: Find tables by column name
+    console.log('\n📋 Test 4: Find tables with specific column');
+    const tablesWithColumn = await findTables({
+      database: 'LASSO',
+      hasColumn: '*ID*'  // Wildcard search for columns containing 'ID'
+    });
+    console.log('✅ Found', tablesWithColumn.length, 'tables with matching column');
+
+    // Test 5: Switch databases
+    console.log('\n📋 Test 5: Switch to PRISM database');
     const prismTables = await findTables({
       database: 'PRISM',  // Different database!
       schema: 'dbo'

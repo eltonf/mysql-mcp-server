@@ -84,7 +84,7 @@ const tools: Tool[] = [
   },
   {
     name: 'find_tables',
-    description: 'Search for tables by name pattern or containing specific columns. Returns list of table names with schema, row counts, and create dates. Examples: pattern="*player*" finds all tables with "player" in the name, hasColumn="PlayerID" finds tables with that column.',
+    description: 'Search for tables by name pattern or containing specific columns. Returns list of table names with schema, row counts, and create dates. Supports wildcards (* and ?). Examples: pattern="*player*" finds tables with "player" in name, hasColumn="*redshirt*" finds tables with columns containing "redshirt".',
     inputSchema: {
       type: 'object',
       properties: {
@@ -98,7 +98,7 @@ const tools: Tool[] = [
         },
         hasColumn: {
           type: 'string',
-          description: 'Find tables containing this column name (exact match, case-insensitive)',
+          description: 'Find tables containing columns matching this pattern. Supports wildcards: * (any characters) or ? (single character). Examples: "*redshirt*", "PlayerID", "*_Date". Case-insensitive.',
         },
         schema: {
           type: 'string',
