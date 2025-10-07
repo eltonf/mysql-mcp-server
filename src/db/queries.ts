@@ -579,3 +579,63 @@ SELECT (
 ) AS MetadataJson;
 `;
 }
+
+/**
+ * Get view definition (CREATE VIEW statement)
+ */
+export function buildGetViewDefinitionQuery(
+  database: string,
+  schemaName: string,
+  viewName: string
+): string {
+  return `
+USE [${database}];
+
+DECLARE @ObjectId INT = OBJECT_ID('[${schemaName.replace(/'/g, "''")}].[${viewName.replace(/'/g, "''")}]');
+
+SELECT (
+  SELECT
+    '${schemaName.replace(/'/g, "''")}' AS 'schema',
+    '${viewName.replace(/'/g, "''")}' AS 'name',
+    'VIEW' AS 'type',
+    v.create_date AS 'createDate',
+    v.modify_date AS 'modifyDate',
+
+    -- Description from extended properties
+    (SELECT value FROM sys.extended_properties ep
+     WHERE ep.major_id = @ObjectId AND ep.minor_id = 0
+     AND ep.name = 'MS_Description') AS 'description',
+
+    -- Source code definition
+    sm.definition AS 'definition',
+
+    -- Columns with metadata
+    (
+      SELECT
+        c.name AS 'name',
+        TYPE_NAME(c.user_type_id) +
+        CASE
+          WHEN TYPE_NAME(c.user_type_id) IN ('varchar', 'char', 'nvarchar', 'nchar')
+            THEN '(' + CASE WHEN c.max_length = -1 THEN 'MAX'
+                            WHEN TYPE_NAME(c.user_type_id) LIKE 'n%'
+                            THEN CAST(c.max_length/2 AS VARCHAR)
+                            ELSE CAST(c.max_length AS VARCHAR) END + ')'
+          WHEN TYPE_NAME(c.user_type_id) IN ('decimal', 'numeric')
+            THEN '(' + CAST(c.precision AS VARCHAR) + ',' + CAST(c.scale AS VARCHAR) + ')'
+          ELSE ''
+        END AS 'dataType',
+        c.is_nullable AS 'nullable',
+        c.column_id AS 'ordinal'
+      FROM sys.columns c
+      WHERE c.object_id = @ObjectId
+      ORDER BY c.column_id
+      FOR JSON PATH
+    ) AS 'columns'
+
+  FROM sys.views v
+  LEFT JOIN sys.sql_modules sm ON v.object_id = sm.object_id
+  WHERE v.object_id = @ObjectId
+  FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+) AS JsonResult;
+`;
+}

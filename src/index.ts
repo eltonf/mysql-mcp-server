@@ -15,6 +15,7 @@ import { findTables } from './handlers/search.js';
 import { getRelationships } from './handlers/relationships.js';
 import { validateDatabaseObject } from './handlers/validation.js';
 import { findRoutines, getRoutineDefinition, getRoutinesSchema } from './handlers/routines.js';
+import { getViewDefinition } from './handlers/views.js';
 
 config();
 
@@ -238,6 +239,28 @@ const tools: Tool[] = [
       required: ['database'],
     },
   },
+  {
+    name: 'get_view_definition',
+    description: 'Get complete definition of a view including SQL source code (CREATE VIEW statement), columns, and metadata. IMPORTANT: If you get an error about view not found, use validate_objects first to find the correct name. Example: Get definition of vw_dal_Player_Agent_info.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
+        view: {
+          type: 'string',
+          description: 'View name',
+        },
+        schema: {
+          type: 'string',
+          description: 'Database schema name (optional). If not specified, will search all schemas and auto-detect. If ambiguous, error will list all matches.',
+        },
+      },
+      required: ['database', 'view'],
+    },
+  },
 
   // Future data query tools will be added here, conditionally based on SCHEMA_ONLY_MODE:
   // ...(!SCHEMA_ONLY_MODE ? [
@@ -377,6 +400,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_routines_schema': {
         const result = await getRoutinesSchema(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_view_definition': {
+        const result = await getViewDefinition(args as any);
         return {
           content: [
             {
