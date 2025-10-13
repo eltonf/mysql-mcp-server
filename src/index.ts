@@ -16,6 +16,7 @@ import { getRelationships } from './handlers/relationships.js';
 import { validateDatabaseObject } from './handlers/validation.js';
 import { findRoutines, getRoutineDefinition, getRoutinesSchema } from './handlers/routines.js';
 import { getViewDefinition } from './handlers/views.js';
+import { executeQuery } from './handlers/data.js';
 
 config();
 
@@ -262,11 +263,31 @@ const tools: Tool[] = [
     },
   },
 
-  // Future data query tools will be added here, conditionally based on SCHEMA_ONLY_MODE:
-  // ...(!SCHEMA_ONLY_MODE ? [
-  //   { name: 'execute_query', description: 'Execute SELECT query', ... },
-  //   { name: 'get_sample_data', description: 'Get sample rows from table', ... },
-  // ] : []),
+  // Data query tools - only available when SCHEMA_ONLY_MODE is false
+  ...(!SCHEMA_ONLY_MODE ? [
+    {
+      name: 'execute_query',
+      description: 'Execute a SELECT query with safety controls. Queries are automatically limited to 50 rows maximum. Complex queries with JOINs, CTEs, subqueries, and aggregations are supported. Response includes `wasModified` flag and `modifications` array to show any changes made to your query for safety. Use ORDER BY to control which rows are sampled when limit is applied. IMPORTANT: Only SELECT queries allowed - no INSERT/UPDATE/DELETE/EXEC operations.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          database: {
+            type: 'string',
+            description: 'Database name (e.g., "LASSO", "PRISM")',
+          },
+          query: {
+            type: 'string',
+            description: 'SELECT query to execute. Supports JOINs, CTEs (WITH), subqueries, WHERE, GROUP BY, HAVING, ORDER BY. Will be automatically limited to 50 rows if no TOP clause exists, or TOP will be reduced to 50 if higher. Use ORDER BY to get meaningful sample data.',
+          },
+          parameters: {
+            type: 'object',
+            description: 'Optional parameters for parameterized queries (e.g., {"@id": 123, "@name": "value"})',
+          },
+        },
+        required: ['database', 'query'],
+      },
+    },
+  ] : []),
 ];
 
 // Create server instance
@@ -412,6 +433,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_view_definition': {
         const result = await getViewDefinition(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'execute_query': {
+        if (SCHEMA_ONLY_MODE) {
+          throw new Error('Data query operations are disabled. SCHEMA_ONLY_MODE is enabled. Set SCHEMA_ONLY_MODE=false to enable data queries.');
+        }
+        const result = await executeQuery(args as any);
         return {
           content: [
             {

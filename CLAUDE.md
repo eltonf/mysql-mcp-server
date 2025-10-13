@@ -187,6 +187,55 @@ Batch retrieval of multiple routines' definitions in one query. PREFERRED over m
 - Returns: Array of routine definitions with source code, parameters, descriptions
 - Leave `routines` empty to get all routines in schema
 
+### get_view_definition
+Get complete definition of a view including SQL source code (CREATE VIEW statement).
+- Parameters: `database`, `view`, `schema?`
+- Returns: View definition, columns, source code
+- Auto-detects schema if not specified
+
+### execute_query (Data Query Tool - requires SCHEMA_ONLY_MODE=false)
+Execute SELECT queries with automatic safety controls and transparent modification feedback.
+- Parameters: `database`, `query`, `parameters?` (optional)
+- Supports: Complex JOINs, CTEs (WITH), subqueries, aggregations, GROUP BY, HAVING, ORDER BY
+- **Automatic row limit**: All queries limited to 50 rows max (configurable via MAX_QUERY_ROWS)
+- **Query validation**: Only SELECT allowed - blocks INSERT/UPDATE/DELETE/EXEC/DROP/ALTER
+- **Transparent modifications**: Response includes:
+  - `originalQuery`: What you sent
+  - `executedQuery`: What actually ran
+  - `wasModified`: Boolean flag
+  - `modifications`: Array of changes made (e.g., "Added TOP 50 limit for safety")
+  - `rows`: Result data
+  - `rowCount`: Number of rows returned
+  - `executionTimeMs`: Query performance
+  - `limitReached`: Boolean (true if hit row limit, meaning more data exists)
+  - `columnNames`: Array of column names in results
+- **Best practices**: Use ORDER BY to control which rows are sampled when limit applies
+
+**Example response when query is modified:**
+```json
+{
+  "originalQuery": "SELECT * FROM Player WHERE Active = 1 ORDER BY Name",
+  "executedQuery": "SELECT TOP 50 * FROM Player WHERE Active = 1 ORDER BY Name",
+  "wasModified": true,
+  "modifications": ["Added TOP 50 limit for safety"],
+  "rows": [...],
+  "rowCount": 50,
+  "limitReached": true,
+  "executionTimeMs": 45,
+  "columnNames": ["PlayerID", "Name", "Active", ...]
+}
+```
+
+**Recommended LLM workflow:**
+1. Use `find_tables` to discover relevant tables
+2. Use `get_schema` or `get_table_info` to understand table structures
+3. Use `get_relationships` to identify foreign keys for JOINs
+4. Write SELECT query with JOINs, WHERE, ORDER BY as needed
+5. Call `execute_query` with your query
+6. Check `wasModified` flag - if true, review `modifications` array
+7. Analyze sample data (max 50 rows) and refine query if needed
+8. If `limitReached` is true, consider adding more specific WHERE clauses or different ORDER BY
+
 ## Important Implementation Notes
 
 ### Schema vs DBO Default
@@ -297,26 +346,20 @@ const SCHEMA_ONLY_MODE = process.env.SCHEMA_ONLY_MODE === 'true';
 
 When `true`, data query tools are not registered with the MCP server (even if DB permissions would allow it).
 
-### Future Data Query Tools
+### Data Query Tools Implementation
 
-When adding data query tools (e.g., `execute_query`, `get_sample_data`):
+Data query capability is now implemented via the `execute_query` tool (see MCP Tools section above).
 
-1. Add tool definitions conditionally in `src/index.ts`:
-```typescript
-const tools: Tool[] = [
-  // ... existing schema tools ...
-
-  // Data query tools - only if not in schema-only mode
-  ...(!SCHEMA_ONLY_MODE ? [
-    { name: 'execute_query', description: '...', inputSchema: {...} },
-    { name: 'get_sample_data', description: '...', inputSchema: {...} },
-  ] : []),
-];
-```
-
-2. Add case handlers in the switch statement
-3. Create handler functions in `src/handlers/` directory
-4. Implement with safety checks (read-only, row limits, timeouts)
+Implementation details:
+- Tool registration: Conditionally added to tools array in [src/index.ts](src/index.ts) when `SCHEMA_ONLY_MODE=false`
+- Handler: [src/handlers/data.ts](src/handlers/data.ts) - `executeQuery()` function
+- Query validation & modification: [src/db/queries.ts](src/db/queries.ts) - `validateQuerySafety()` and `enforceRowLimit()` functions
+- Safety features:
+  - Automatic TOP limit injection/modification
+  - SELECT-only validation (blocks DML/DDL/EXEC)
+  - Configurable row limit (MAX_QUERY_ROWS env var, default 50)
+  - Query timeout (QUERY_TIMEOUT_MS env var, default 30000ms)
+  - Transparent modification feedback to LLM
 
 ### Best Practices
 
@@ -346,6 +389,14 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed instructions.
 
 ## Recent Changes
 
+- **Data query capability** (Oct 2025) - Added `execute_query` tool for running SELECT queries with automatic safety controls:
+  - Automatic TOP 50 row limit (configurable via MAX_QUERY_ROWS env var)
+  - Transparent modification feedback - response shows if/how query was changed
+  - Supports complex JOINs, CTEs, subqueries, aggregations
+  - Only SELECT allowed - blocks DML/DDL/EXEC operations
+  - 30-second timeout (configurable via QUERY_TIMEOUT_MS)
+  - Conditional on SCHEMA_ONLY_MODE=false + db_datareader permissions
+- **View introspection** (Oct 2025) - Added `get_view_definition` tool to retrieve view source code and columns
 - **Routine introspection** (Oct 2025) - Added support for stored procedures and functions via `find_routines`, `get_routine_definition`, and `get_routines_schema` tools; uses `sys.objects`, `sys.sql_modules`, and `sys.parameters` for full metadata including source code and parameters
 - **Permission model** (Oct 2025) - Split setup scripts into Schema-Only and Full Access; added `SCHEMA_ONLY_MODE` environment variable for dual-layer security
 - **Removed `generate_query` tool** (Oct 2025) - was generating useless template queries; LLM clients should generate SQL directly using schema metadata from other tools

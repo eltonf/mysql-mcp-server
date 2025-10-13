@@ -639,3 +639,133 @@ SELECT (
 ) AS JsonResult;
 `;
 }
+
+/**
+ * Query modification result
+ */
+export interface QueryModificationResult {
+  wasModified: boolean;
+  modifiedQuery: string;
+  modifications: string[];
+  originalTopValue?: number;
+  appliedTopValue?: number;
+}
+
+/**
+ * Validates that a query is safe to execute (SELECT-only)
+ * Throws error if query contains dangerous operations
+ */
+export function validateQuerySafety(query: string): void {
+  const normalizedQuery = query.trim().toUpperCase();
+
+  // Block dangerous SQL operations
+  const dangerousPatterns = [
+    { pattern: /\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|CREATE|ALTER|EXEC|EXECUTE|GRANT|REVOKE|DENY)\b/i, type: 'DML/DDL/EXEC' },
+    { pattern: /\bSP_EXECUTESQL\b/i, type: 'Dynamic SQL' },
+    { pattern: /\bXP_CMDSHELL\b/i, type: 'Command execution' },
+    { pattern: /\bOPENROWSET\b/i, type: 'External data access' },
+    { pattern: /\bOPENQUERY\b/i, type: 'External query' },
+    { pattern: /\bBULK\s+INSERT\b/i, type: 'Bulk operation' },
+  ];
+
+  for (const { pattern, type } of dangerousPatterns) {
+    if (pattern.test(query)) {
+      throw new Error(`Query contains forbidden ${type} operation. Only SELECT queries are allowed.`);
+    }
+  }
+
+  // Must start with SELECT or WITH (for CTEs)
+  if (!normalizedQuery.startsWith('SELECT') && !normalizedQuery.startsWith('WITH')) {
+    throw new Error('Query must start with SELECT or WITH (for CTEs). Only SELECT queries are allowed.');
+  }
+}
+
+/**
+ * Analyzes query and enforces row limit by injecting/modifying TOP clause
+ * Returns modification result with original and modified queries
+ */
+export function enforceRowLimit(query: string, maxRows: number): QueryModificationResult {
+  const trimmedQuery = query.trim();
+  const modifications: string[] = [];
+
+  // Regular expression to detect existing TOP clause in SELECT statement
+  // Handles: SELECT TOP 10, SELECT TOP (10), SELECT TOP 10 PERCENT
+  const topPattern = /^\s*(SELECT)\s+(TOP\s+\(?\s*(\d+)\s*\)?\s*(PERCENT)?)/i;
+  const selectPattern = /^\s*(SELECT)\s+/i;
+  const withPattern = /^\s*(WITH\s+.+?\s+AS\s+\(.+?\))\s+(SELECT)\s+/is;
+
+  let modifiedQuery = trimmedQuery;
+  let wasModified = false;
+  let originalTopValue: number | undefined;
+  let appliedTopValue: number = maxRows;
+
+  // Check if query starts with CTE (WITH clause)
+  const withMatch = trimmedQuery.match(withPattern);
+  if (withMatch) {
+    // Query has CTE - need to inject TOP into the final SELECT
+    const restOfQuery = trimmedQuery.substring(withMatch[0].length);
+
+    // Check if final SELECT has TOP
+    const topMatch = restOfQuery.match(topPattern);
+    if (topMatch) {
+      originalTopValue = parseInt(topMatch[3]);
+      if (topMatch[4]) {
+        // PERCENT clause - not supported, add warning
+        modifications.push(`Removed TOP ${originalTopValue} PERCENT (not compatible with row limit)`);
+        modifiedQuery = `${withMatch[0].substring(0, withMatch[0].length - 'SELECT '.length)}SELECT TOP ${maxRows} ${restOfQuery.replace(topPattern, '')}`;
+        wasModified = true;
+      } else if (originalTopValue > maxRows) {
+        modifications.push(`Reduced TOP limit from ${originalTopValue} to ${maxRows} (safety maximum)`);
+        modifiedQuery = `${withMatch[0].substring(0, withMatch[0].length - 'SELECT '.length)}SELECT TOP ${maxRows} ${restOfQuery.replace(topPattern, '')}`;
+        wasModified = true;
+      } else {
+        // Existing TOP is within limit - keep it
+        appliedTopValue = originalTopValue;
+      }
+    } else {
+      // No TOP in final SELECT - add it
+      modifications.push(`Added TOP ${maxRows} limit for safety`);
+      modifiedQuery = `${withMatch[0]}TOP ${maxRows} ${restOfQuery.replace(selectPattern, '')}`;
+      wasModified = true;
+    }
+  } else {
+    // Simple SELECT query
+    const topMatch = trimmedQuery.match(topPattern);
+    if (topMatch) {
+      originalTopValue = parseInt(topMatch[3]);
+      if (topMatch[4]) {
+        // PERCENT clause - not supported
+        modifications.push(`Removed TOP ${originalTopValue} PERCENT (not compatible with row limit)`);
+        modifiedQuery = trimmedQuery.replace(topPattern, `SELECT TOP ${maxRows} `);
+        wasModified = true;
+      } else if (originalTopValue > maxRows) {
+        modifications.push(`Reduced TOP limit from ${originalTopValue} to ${maxRows} (safety maximum)`);
+        modifiedQuery = trimmedQuery.replace(topPattern, `SELECT TOP ${maxRows} `);
+        wasModified = true;
+      } else {
+        // Existing TOP is within limit - keep it
+        appliedTopValue = originalTopValue;
+      }
+    } else {
+      // No TOP clause - add it
+      modifications.push(`Added TOP ${maxRows} limit for safety`);
+      modifiedQuery = trimmedQuery.replace(selectPattern, `SELECT TOP ${maxRows} `);
+      wasModified = true;
+    }
+  }
+
+  return {
+    wasModified,
+    modifiedQuery,
+    modifications,
+    originalTopValue,
+    appliedTopValue,
+  };
+}
+
+/**
+ * Wraps user query with database context and prepares for execution
+ */
+export function buildDataQuerySQL(database: string, query: string): string {
+  return `USE [${database}];\n\n${query}`;
+}
