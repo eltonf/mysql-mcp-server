@@ -64,6 +64,58 @@ interface SchemaResult {
   schema: TableMetadata[];
 }
 
+/**
+ * Find ALL schema locations for each table (supports cross-schema discovery).
+ * Returns tables grouped by schema and any tables not found.
+ */
+async function findTablesAcrossSchemas(
+  database: string,
+  tables: string[]
+): Promise<{
+  tablesBySchema: Map<string, string[]>;
+  notFound: { table: string; message: string; suggestions?: string[] }[];
+}> {
+  const tablesBySchema = new Map<string, string[]>();
+  const notFound: { table: string; message: string; suggestions?: string[] }[] = [];
+
+  for (const table of tables) {
+    const validation = await validateDatabaseObject(database, table);
+
+    if (validation.valid && validation.table?.actualName) {
+      // Single match - extract schema from "schema.table"
+      const fullName = validation.table.actualName;
+      const [detectedSchema, actualTable] = fullName.includes('.')
+        ? fullName.split('.')
+        : ['dbo', fullName];
+
+      if (!tablesBySchema.has(detectedSchema)) {
+        tablesBySchema.set(detectedSchema, []);
+      }
+      tablesBySchema.get(detectedSchema)!.push(actualTable);
+    } else if (validation.table?.tables && validation.table.tables.length > 1) {
+      // Multiple matches across schemas - add ALL of them
+      for (const match of validation.table.tables) {
+        const schemaName = match.schema || 'dbo';
+        const tableName = match.table || table;
+
+        if (!tablesBySchema.has(schemaName)) {
+          tablesBySchema.set(schemaName, []);
+        }
+        tablesBySchema.get(schemaName)!.push(tableName);
+      }
+    } else {
+      // Not found
+      notFound.push({
+        table,
+        message: validation.message,
+        suggestions: validation.table?.suggestions
+      });
+    }
+  }
+
+  return { tablesBySchema, notFound };
+}
+
 export async function getSchema(args: {
   database: string;
   tables?: string[];
@@ -74,55 +126,98 @@ export async function getSchema(args: {
   const {
     database,
     tables,
-    schema = 'dbo',
+    schema,  // undefined triggers auto-detection
     includeRelationships = true,
     includeStatistics = false,
   } = args;
 
-  const cacheKey = `schema:${database}:${schema}:${tables?.join(',') || 'all'}:${includeRelationships}:${includeStatistics}`;
-  const cached = cache.get<SchemaResult>(cacheKey);
-  if (cached) {
-    logger.info('Returning cached schema data');
-    return cached;
-  }
+  // Helper to parse nested JSON in table metadata
+  const parseTableMetadata = (table: TableMetadata): TableMetadata => ({
+    ...table,
+    columns: typeof table.columns === 'string' ? JSON.parse(table.columns) : table.columns,
+    foreignKeys: table.foreignKeys && typeof table.foreignKeys === 'string'
+      ? JSON.parse(table.foreignKeys)
+      : table.foreignKeys,
+    indexes: typeof table.indexes === 'string' ? JSON.parse(table.indexes) : table.indexes,
+  });
 
-  try {
-    // Build inline SQL query
+  // Helper to execute schema query and parse results
+  const executeSchemaQuery = async (
+    schemaName: string,
+    tableNames: string[] | null
+  ): Promise<TableMetadata[]> => {
     const query = buildGetSchemaMetadataQuery(
       database,
-      schema,
-      tables || null,
+      schemaName,
+      tableNames,
       includeRelationships,
       includeStatistics
     );
 
     const queryResult = await db.query(query);
-
-    // The inline query returns a single row with a JSON string
     const jsonRow = queryResult.recordset[0];
+
     if (!jsonRow || !jsonRow.MetadataJson) {
-      logger.warn('No metadata returned from query');
-      return { schema: [] };
+      return [];
     }
 
-    // Parse the JSON result
     const result: SchemaResult = JSON.parse(jsonRow.MetadataJson);
+    return (result.schema || []).map(parseTableMetadata);
+  };
 
-    // Parse nested JSON arrays if they're strings
-    if (result.schema) {
-      result.schema = result.schema.map(table => ({
-        ...table,
-        columns: typeof table.columns === 'string' ? JSON.parse(table.columns) : table.columns,
-        foreignKeys: table.foreignKeys && typeof table.foreignKeys === 'string'
-          ? JSON.parse(table.foreignKeys)
-          : table.foreignKeys,
-        indexes: typeof table.indexes === 'string' ? JSON.parse(table.indexes) : table.indexes,
-      }));
+  try {
+    // Case 1: Schema explicitly provided - use existing single-query logic
+    if (schema) {
+      const cacheKey = `schema:${database}:${schema}:${tables?.join(',') || 'all'}:${includeRelationships}:${includeStatistics}`;
+      const cached = cache.get<SchemaResult>(cacheKey);
+      if (cached) {
+        logger.info('Returning cached schema data');
+        return cached;
+      }
+
+      const schemaData = await executeSchemaQuery(schema, tables || null);
+      const result: SchemaResult = { schema: schemaData };
+
+      cache.set(cacheKey, result);
+      logger.info(`Retrieved schema for ${schemaData.length} tables from ${database}.${schema}`);
+      return result;
     }
 
-    cache.set(cacheKey, result);
-    logger.info(`Retrieved schema for ${result.schema?.length || 0} tables from ${database}`);
-    return result;
+    // Case 2: Tables provided, no schema - find ALL matches across schemas
+    if (tables && tables.length > 0) {
+      const cacheKey = `schema:${database}:auto:${tables.join(',')}:${includeRelationships}:${includeStatistics}`;
+      const cached = cache.get<SchemaResult>(cacheKey);
+      if (cached) {
+        logger.info('Returning cached schema data (auto-detected)');
+        return cached;
+      }
+
+      const { tablesBySchema, notFound } = await findTablesAcrossSchemas(database, tables);
+
+      // Handle not found tables
+      if (notFound.length > 0) {
+        const errorLines = notFound.map(e =>
+          `  - ${e.table}: ${e.suggestions?.length ? `Did you mean: ${e.suggestions.join(', ')}?` : 'No matches found'}`
+        );
+        throw new Error(`Tables not found:\n${errorLines.join('\n')}`);
+      }
+
+      // Query each schema and merge results
+      const allResults: TableMetadata[] = [];
+      for (const [schemaName, schemaTables] of tablesBySchema) {
+        const schemaData = await executeSchemaQuery(schemaName, schemaTables);
+        allResults.push(...schemaData);
+      }
+
+      const result: SchemaResult = { schema: allResults };
+      cache.set(cacheKey, result);
+      logger.info(`Retrieved schema for ${allResults.length} tables from ${database} (auto-detected across ${tablesBySchema.size} schemas)`);
+      return result;
+    }
+
+    // Case 3: No tables, no schema - require schema parameter
+    throw new Error('Schema parameter is required when no tables are specified. Use find_tables to discover available tables first.');
+
   } catch (error) {
     logger.error(`Error getting schema from ${database}:`, error);
     throw error;
