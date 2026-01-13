@@ -15,12 +15,35 @@ Access control is **restrictive by default** - data queries are blocked until yo
 
 2. Edit `query-access.json` to match your needs
 
-3. Set the environment variable:
-   ```bash
-   QUERY_ACCESS_CONFIG=/path/to/query-access.json
+3. Set `QUERY_ACCESS_CONFIG` in your **MCP client config** (not .env):
+
+   **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+   ```json
+   {
+     "mcpServers": {
+       "sql-server-mcp": {
+         "env": {
+           "QUERY_ACCESS_CONFIG": "/absolute/path/to/query-access.json"
+         }
+       }
+     }
+   }
    ```
 
-4. Restart the MCP server
+   **Claude Code** (`~/.claude.json` under `mcpServers`):
+   ```json
+   {
+     "mcpServers": {
+       "sql-server": {
+         "env": {
+           "QUERY_ACCESS_CONFIG": "/absolute/path/to/query-access.json"
+         }
+       }
+     }
+   }
+   ```
+
+4. Restart/reconnect the MCP server (in Claude Code, use `/mcp`)
 
 ## Configuration Structure
 
@@ -217,11 +240,13 @@ When access is denied, the LLM receives clear error messages:
 
 ### "Access control not configured"
 
-The `QUERY_ACCESS_CONFIG` environment variable is not set or the file doesn't exist.
+The `QUERY_ACCESS_CONFIG` environment variable is not set in your MCP client config, or the file doesn't exist.
 
-**Fix:** Set the environment variable to point to your config file:
-```bash
-QUERY_ACCESS_CONFIG=/path/to/query-access.json
+**Fix:** Add `QUERY_ACCESS_CONFIG` to your MCP client's env section (see Quick Start above). Use an absolute path:
+```json
+"env": {
+  "QUERY_ACCESS_CONFIG": "/absolute/path/to/query-access.json"
+}
 ```
 
 ### "Database 'X' is not configured"

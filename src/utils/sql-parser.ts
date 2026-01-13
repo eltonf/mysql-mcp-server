@@ -189,6 +189,7 @@ function processColumnExpression(
   if (!expr) return;
 
   // Handle star expression (SELECT * or table.*)
+  // node-sql-parser returns this as type='star' OR type='column_ref' with column='*'
   if (expr.type === 'star') {
     result.hasSelectStar = true;
     if (expr.table) {
@@ -199,8 +200,19 @@ function processColumnExpression(
     return;
   }
 
-  // Handle column reference
+  // Handle column reference - check for SELECT * variant (column_ref with column='*')
   if (expr.type === 'column_ref') {
+    // Check if this is actually SELECT * or table.*
+    if (expr.column === '*') {
+      result.hasSelectStar = true;
+      if (expr.table) {
+        result.selectStarTables.push(expr.table);
+      } else {
+        result.selectStarTables.push('*');
+      }
+      return;
+    }
+
     const colRef = extractColumnRef(expr, database, defaultSchema, result);
     if (colRef) {
       result.columns.push(colRef);
