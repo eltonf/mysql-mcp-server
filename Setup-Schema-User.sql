@@ -24,23 +24,25 @@
  * USAGE OPTION 2: SSMS / Azure Data Studio
  *******************************************************************************
  *
- * 1. Edit the variables in the T-SQL section below
- * 2. Select all and execute (F5)
+ * 1. Enable SQLCMD Mode: Query menu > SQLCMD Mode
+ * 2. Uncomment and edit the :setvar lines below
+ * 3. Select all and execute (F5)
  *
  ******************************************************************************/
 
--- Uncomment this section for SQLCMD mode
-/*
-:setvar LoginName "mcp_schema_only"
-:setvar Password "YourStrongPassword123!"
-:setvar DatabaseList "LASSO,PRISM,PRISMCollege"
-*/
+-- Configuration variables
+-- For SQLCMD CLI: use -v flags, e.g., -v LoginName="myuser"
+-- For SSMS: enable SQLCMD Mode, uncomment and edit the :setvar lines below
+-- :setvar LoginName "mcp_schema_only"
+-- :setvar Password "YourStrongPassword123!"
+-- :setvar DatabaseList "LASSO,PRISM,PRISMCollege"
+-- :setvar Verbose "1"
 
--- T-SQL version for SSMS/Azure Data Studio
--- Edit these variables, then select all and execute
-DECLARE @LoginName NVARCHAR(128) = N'mcp_schema_only';
-DECLARE @Password NVARCHAR(128) = N'YourStrongPassword123!';
-DECLARE @DatabaseList NVARCHAR(MAX) = N'LASSO,PRISM,PRISMCollege'; -- Comma-separated list
+-- Map SQLCMD variables to T-SQL variables (do not edit)
+DECLARE @LoginName NVARCHAR(128) = N'$(LoginName)';
+DECLARE @Password NVARCHAR(128) = N'$(Password)';
+DECLARE @DatabaseList NVARCHAR(MAX) = N'$(DatabaseList)';
+DECLARE @Verbose INT = $(Verbose);
 
 /*******************************************************************************
  * DO NOT EDIT BELOW THIS LINE
@@ -48,20 +50,13 @@ DECLARE @DatabaseList NVARCHAR(MAX) = N'LASSO,PRISM,PRISMCollege'; -- Comma-sepa
 
 SET NOCOUNT ON;
 
-PRINT '';
-PRINT '========================================';
-PRINT 'SQL Server MCP Schema-Only User Setup';
-PRINT '========================================';
-PRINT 'Login: ' + @LoginName;
-PRINT 'Access Level: SCHEMA ONLY (no data access)';
-PRINT 'Databases: ' + @DatabaseList;
-PRINT '';
-
--- Create table to hold database names
+-- Create table to hold database names and track results
 DECLARE @Databases TABLE (DatabaseName NVARCHAR(128));
+DECLARE @Results TABLE (Action NVARCHAR(50), Detail NVARCHAR(256));
 
 -- Parse comma-separated database list
 DECLARE @Pos INT, @Database NVARCHAR(128);
+DECLARE @OriginalList NVARCHAR(MAX) = @DatabaseList;
 SET @DatabaseList = @DatabaseList + ',';
 
 WHILE CHARINDEX(',', @DatabaseList) > 0
@@ -72,38 +67,32 @@ BEGIN
 
     IF @Database <> ''
     BEGIN
-        -- Validate database exists
         IF EXISTS (SELECT 1 FROM sys.databases WHERE name = @Database)
         BEGIN
             INSERT INTO @Databases (DatabaseName) VALUES (@Database);
-            PRINT '  ✓ Found database: ' + @Database;
         END
         ELSE
         BEGIN
-            PRINT '  ✗ WARNING: Database not found: ' + @Database;
+            PRINT '  WARNING: Database not found: ' + @Database;
         END
     END
 END
-
-PRINT '';
 
 /*******************************************************************************
  * STEP 1: Create Server Login
  ******************************************************************************/
 USE master;
 
-PRINT 'Step 1: Creating server login...';
-
 IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @LoginName)
 BEGIN
     DECLARE @CreateLoginSQL NVARCHAR(MAX);
     SET @CreateLoginSQL = N'CREATE LOGIN [' + @LoginName + N'] WITH PASSWORD = ''' + @Password + N''', CHECK_POLICY = OFF;';
     EXEC sp_executesql @CreateLoginSQL;
-    PRINT '  ✓ Created login: ' + @LoginName;
+    INSERT INTO @Results VALUES ('Login', 'Created: ' + @LoginName);
 END
 ELSE
 BEGIN
-    PRINT '  → Login already exists: ' + @LoginName;
+    IF @Verbose = 1 INSERT INTO @Results VALUES ('Login', 'Already exists: ' + @LoginName);
 END
 
 -- Grant server-level permissions
@@ -116,14 +105,12 @@ BEGIN
     DECLARE @GrantServerSQL NVARCHAR(MAX);
     SET @GrantServerSQL = N'GRANT VIEW ANY DEFINITION TO [' + @LoginName + N'];';
     EXEC sp_executesql @GrantServerSQL;
-    PRINT '  ✓ Granted VIEW ANY DEFINITION permission';
+    INSERT INTO @Results VALUES ('Permission', 'Granted VIEW ANY DEFINITION');
 END
 ELSE
 BEGIN
-    PRINT '  → VIEW ANY DEFINITION already granted';
+    IF @Verbose = 1 INSERT INTO @Results VALUES ('Permission', 'VIEW ANY DEFINITION already granted');
 END
-
-PRINT '';
 
 /*******************************************************************************
  * STEP 2: Create Users and Grant SCHEMA-ONLY Permissions in Each Database
@@ -131,6 +118,7 @@ PRINT '';
 
 DECLARE @CurrentDB NVARCHAR(128);
 DECLARE @SQL NVARCHAR(MAX);
+DECLARE @DbCount INT = 0;
 
 DECLARE db_cursor CURSOR FOR
 SELECT DatabaseName FROM @Databases;
@@ -140,7 +128,7 @@ FETCH NEXT FROM db_cursor INTO @CurrentDB;
 
 WHILE @@FETCH_STATUS = 0
 BEGIN
-    PRINT 'Step 2: Configuring database: ' + @CurrentDB;
+    SET @DbCount = @DbCount + 1;
 
     -- Build dynamic SQL for this database
     SET @SQL = N'
@@ -150,11 +138,6 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = ''' + @LoginName + N''')
     BEGIN
         CREATE USER [' + @LoginName + N'] FOR LOGIN [' + @LoginName + N'];
-        PRINT ''  ✓ Created user in ' + @CurrentDB + N''';
-    END
-    ELSE
-    BEGIN
-        PRINT ''  → User already exists in ' + @CurrentDB + N''';
     END
 
     -- Grant VIEW DEFINITION (schema metadata only)
@@ -165,14 +148,9 @@ BEGIN
     )
     BEGIN
         GRANT VIEW DEFINITION TO [' + @LoginName + N'];
-        PRINT ''  ✓ Granted VIEW DEFINITION permission (schema only)'';
-    END
-    ELSE
-    BEGIN
-        PRINT ''  → VIEW DEFINITION already granted'';
     END
 
-    -- Explicitly verify NO data reader access
+    -- Check for unexpected db_datareader access
     IF EXISTS (
         SELECT 1 FROM sys.database_role_members rm
         JOIN sys.database_principals rp ON rm.role_principal_id = rp.principal_id
@@ -180,14 +158,8 @@ BEGIN
         WHERE rp.name = ''db_datareader'' AND mp.name = ''' + @LoginName + N'''
     )
     BEGIN
-        PRINT ''  ⚠ WARNING: User has db_datareader role - this grants data access!'';
+        PRINT ''  WARNING: ' + @CurrentDB + N' - User has db_datareader role (grants data access)'';
     END
-    ELSE
-    BEGIN
-        PRINT ''  ✓ Confirmed NO data access (db_datareader not granted)'';
-    END
-
-    PRINT '''';
     ';
 
     EXEC sp_executesql @SQL;
@@ -199,44 +171,36 @@ CLOSE db_cursor;
 DEALLOCATE db_cursor;
 
 /*******************************************************************************
- * STEP 3: Summary
+ * STEP 3: Output Results
  ******************************************************************************/
 
-PRINT '========================================';
-PRINT 'Setup Complete!';
-PRINT '========================================';
+-- Print results
+IF @Verbose = 1
+BEGIN
+    PRINT '';
+    PRINT 'Actions performed:';
+    DECLARE @Action NVARCHAR(50), @Detail NVARCHAR(256);
+    DECLARE result_cursor CURSOR FOR SELECT Action, Detail FROM @Results;
+    OPEN result_cursor;
+    FETCH NEXT FROM result_cursor INTO @Action, @Detail;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        PRINT '  ' + @Action + ': ' + @Detail;
+        FETCH NEXT FROM result_cursor INTO @Action, @Detail;
+    END
+    CLOSE result_cursor;
+    DEALLOCATE result_cursor;
+    PRINT '';
+END
+
+-- Final summary
 PRINT '';
-PRINT 'Login: ' + @LoginName;
-PRINT 'Access Level: SCHEMA ONLY';
-PRINT '';
-PRINT 'Permissions granted:';
-PRINT '  • VIEW ANY DEFINITION (server-level)';
-PRINT '  • VIEW DEFINITION (per database)';
-PRINT '  • NO db_datareader (cannot read table data)';
-PRINT '';
-PRINT 'This user can:';
-PRINT '  ✓ View table schemas, columns, data types';
-PRINT '  ✓ View foreign keys and relationships';
-PRINT '  ✓ View indexes and constraints';
-PRINT '  ✓ Search for tables and objects';
-PRINT '';
-PRINT 'This user CANNOT:';
-PRINT '  ✗ Read data from tables';
-PRINT '  ✗ Execute SELECT queries on user tables';
-PRINT '';
+PRINT 'Setup complete: ' + @LoginName + ' (schema-only)';
 PRINT 'Databases configured:';
 
-SELECT DatabaseName FROM @Databases;
-
-PRINT '';
-PRINT 'Configure MCP server with:';
-PRINT '  DB_SERVER=your-server';
-PRINT '  DB_USER=' + @LoginName;
-PRINT '  DB_PASSWORD=<your_password>';
-PRINT '  SCHEMA_ONLY_MODE=true  # Extra safety layer';
-PRINT '';
-PRINT 'For data access, use Setup-Full-User.sql instead.';
-PRINT '';
+DECLARE @DbList NVARCHAR(MAX) = '';
+SELECT @DbList = @DbList + '  ' + DatabaseName + CHAR(13) + CHAR(10) FROM @Databases;
+PRINT @DbList;
 
 /*******************************************************************************
  * OPTIONAL: Cleanup Script
@@ -245,9 +209,7 @@ PRINT '';
  ******************************************************************************/
 /*
 PRINT '';
-PRINT '========================================';
 PRINT 'CLEANUP: Removing user and login';
-PRINT '========================================';
 
 -- Remove users from each database
 DECLARE cleanup_cursor CURSOR FOR
@@ -263,7 +225,7 @@ BEGIN
     IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = ''' + @LoginName + N''')
     BEGIN
         DROP USER [' + @LoginName + N'];
-        PRINT ''  ✓ Removed user from ' + @CurrentDB + N''';
+        PRINT ''  Removed user from ' + @CurrentDB + N''';
     END
     ';
     EXEC sp_executesql @SQL;
@@ -280,7 +242,7 @@ IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @LoginName)
 BEGIN
     SET @SQL = N'DROP LOGIN [' + @LoginName + N'];';
     EXEC sp_executesql @SQL;
-    PRINT '  ✓ Removed login: ' + @LoginName;
+    PRINT '  Removed login: ' + @LoginName;
 END
 
 PRINT 'Cleanup complete!';

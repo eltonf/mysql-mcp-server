@@ -79,6 +79,22 @@ sqlcmd -S your-server -E -i Setup-Full-User.sql \
 - ✅ `VIEW DEFINITION` (per database)
 - ✅ `db_datareader` (allows SELECT queries on data)
 
+#### Option C: Using Setup Script (Recommended)
+
+The setup script sources `.env` for configuration, avoiding hardcoded credentials in SQL files:
+
+1. Copy `.env.example` to `.env` and configure:
+   - `DB_SERVER` - your SQL Server hostname
+   - `DB_USER` - login name to create (e.g., `mcp_schema_only`)
+   - `DB_PASSWORD` - password for the login
+   - `DB_DATABASE_LIST` - comma-separated databases (e.g., `LASSO,PRISM`)
+   - `SCHEMA_ONLY_MODE` - `true` for schema-only, `false` for full access
+
+2. Run the setup script (uses Windows authentication via `-E` flag):
+   ```bash
+   ./scripts/setup-user.sh
+   ```
+
 ### 3. Install and Build
 
 ```bash
