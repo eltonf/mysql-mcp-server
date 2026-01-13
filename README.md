@@ -107,7 +107,8 @@ SCHEMA_ONLY_MODE=true  # Extra safety layer
 DB_SERVER=your-server.domain.com
 DB_USER=mcp_full_access
 DB_PASSWORD=YourPassword123!
-SCHEMA_ONLY_MODE=false  # Allow data query tools when implemented
+SCHEMA_ONLY_MODE=false  # Allow data query tools
+MAX_QUERY_ROWS=100      # Optional: Override default row limit for queries
 ```
 
 **Windows NTLM (Windows only):**
@@ -121,6 +122,7 @@ DB_DOMAIN=YOUR_DOMAIN
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
+**For Schema-Only Access:**
 ```json
 {
   "mcpServers": {
@@ -129,14 +131,37 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
       "args": ["/absolute/path/to/sql-server-mcp/dist/index.js"],
       "env": {
         "DB_SERVER": "your-server.domain.com",
-        "DB_USER": "mcp_readonly",
+        "DB_USER": "mcp_schema_only",
         "DB_PASSWORD": "YourPassword123!",
+        "SCHEMA_ONLY_MODE": "true",
         "LOG_LEVEL": "info"
       }
     }
   }
 }
 ```
+
+**For Full Access (with data queries):**
+```json
+{
+  "mcpServers": {
+    "sql-server-mcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/sql-server-mcp/dist/index.js"],
+      "env": {
+        "DB_SERVER": "your-server.domain.com",
+        "DB_USER": "mcp_full_access",
+        "DB_PASSWORD": "YourPassword123!",
+        "SCHEMA_ONLY_MODE": "false",
+        "MAX_QUERY_ROWS": "100",
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}
+```
+
+**Note:** `MAX_QUERY_ROWS` (default: 100) controls the maximum number of rows returned by data queries. You can override this to a higher value (e.g., 250, 500) based on your needs.
 
 ### 6. Restart Claude Desktop
 

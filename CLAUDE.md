@@ -197,13 +197,13 @@ Get complete definition of a view including SQL source code (CREATE VIEW stateme
 Execute SELECT queries with automatic safety controls and transparent modification feedback.
 - Parameters: `database`, `query`, `parameters?` (optional)
 - Supports: Complex JOINs, CTEs (WITH), subqueries, aggregations, GROUP BY, HAVING, ORDER BY
-- **Automatic row limit**: All queries limited to 50 rows max (configurable via MAX_QUERY_ROWS)
+- **Automatic row limit**: All queries limited to 100 rows max (configurable via MAX_QUERY_ROWS environment variable in MCP client config)
 - **Query validation**: Only SELECT allowed - blocks INSERT/UPDATE/DELETE/EXEC/DROP/ALTER
 - **Transparent modifications**: Response includes:
   - `originalQuery`: What you sent
   - `executedQuery`: What actually ran
   - `wasModified`: Boolean flag
-  - `modifications`: Array of changes made (e.g., "Added TOP 50 limit for safety")
+  - `modifications`: Array of changes made (e.g., "Added TOP 100 limit for safety")
   - `rows`: Result data
   - `rowCount`: Number of rows returned
   - `executionTimeMs`: Query performance
@@ -215,11 +215,11 @@ Execute SELECT queries with automatic safety controls and transparent modificati
 ```json
 {
   "originalQuery": "SELECT * FROM Player WHERE Active = 1 ORDER BY Name",
-  "executedQuery": "SELECT TOP 50 * FROM Player WHERE Active = 1 ORDER BY Name",
+  "executedQuery": "SELECT TOP 100 * FROM Player WHERE Active = 1 ORDER BY Name",
   "wasModified": true,
-  "modifications": ["Added TOP 50 limit for safety"],
+  "modifications": ["Added TOP 100 limit for safety"],
   "rows": [...],
-  "rowCount": 50,
+  "rowCount": 100,
   "limitReached": true,
   "executionTimeMs": 45,
   "columnNames": ["PlayerID", "Name", "Active", ...]
@@ -233,7 +233,7 @@ Execute SELECT queries with automatic safety controls and transparent modificati
 4. Write SELECT query with JOINs, WHERE, ORDER BY as needed
 5. Call `execute_query` with your query
 6. Check `wasModified` flag - if true, review `modifications` array
-7. Analyze sample data (max 50 rows) and refine query if needed
+7. Analyze sample data (max 100 rows by default) and refine query if needed
 8. If `limitReached` is true, consider adding more specific WHERE clauses or different ORDER BY
 
 ## Important Implementation Notes
@@ -357,7 +357,7 @@ Implementation details:
 - Safety features:
   - Automatic TOP limit injection/modification
   - SELECT-only validation (blocks DML/DDL/EXEC)
-  - Configurable row limit (MAX_QUERY_ROWS env var, default 50)
+  - Configurable row limit (MAX_QUERY_ROWS env var, default 100)
   - Query timeout (QUERY_TIMEOUT_MS env var, default 30000ms)
   - Transparent modification feedback to LLM
 
@@ -390,7 +390,7 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed instructions.
 ## Recent Changes
 
 - **Data query capability** (Oct 2025) - Added `execute_query` tool for running SELECT queries with automatic safety controls:
-  - Automatic TOP 50 row limit (configurable via MAX_QUERY_ROWS env var)
+  - Automatic TOP 100 row limit (configurable via MAX_QUERY_ROWS env var in MCP client config)
   - Transparent modification feedback - response shows if/how query was changed
   - Supports complex JOINs, CTEs, subqueries, aggregations
   - Only SELECT allowed - blocks DML/DDL/EXEC operations

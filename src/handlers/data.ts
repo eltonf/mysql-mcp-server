@@ -7,8 +7,8 @@ import {
   QueryModificationResult,
 } from '../db/queries.js';
 
-// Get max rows from environment or default to 50
-const MAX_QUERY_ROWS = parseInt(process.env.MAX_QUERY_ROWS || '50', 10);
+// Get max rows from environment or default to 100
+const MAX_QUERY_ROWS = parseInt(process.env.MAX_QUERY_ROWS || '100', 10);
 // Note: QUERY_TIMEOUT_MS is available for future use with mssql request.timeout()
 // const QUERY_TIMEOUT_MS = parseInt(process.env.QUERY_TIMEOUT_MS || '30000', 10);
 

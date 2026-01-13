@@ -267,7 +267,7 @@ const tools: Tool[] = [
   ...(!SCHEMA_ONLY_MODE ? [
     {
       name: 'execute_query',
-      description: 'Execute a SELECT query with safety controls. Queries are automatically limited to 50 rows maximum. Complex queries with JOINs, CTEs, subqueries, and aggregations are supported. Response includes `wasModified` flag and `modifications` array to show any changes made to your query for safety. Use ORDER BY to control which rows are sampled when limit is applied. IMPORTANT: Only SELECT queries allowed - no INSERT/UPDATE/DELETE/EXEC operations.',
+      description: 'Execute a SELECT query with safety controls. Queries are automatically limited to 100 rows maximum (configurable via MAX_QUERY_ROWS environment variable). Complex queries with JOINs, CTEs, subqueries, and aggregations are supported. Response includes `wasModified` flag and `modifications` array to show any changes made to your query for safety. Use ORDER BY to control which rows are sampled when limit is applied. IMPORTANT: Only SELECT queries allowed - no INSERT/UPDATE/DELETE/EXEC operations.',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -277,7 +277,7 @@ const tools: Tool[] = [
           },
           query: {
             type: 'string',
-            description: 'SELECT query to execute. Supports JOINs, CTEs (WITH), subqueries, WHERE, GROUP BY, HAVING, ORDER BY. Will be automatically limited to 50 rows if no TOP clause exists, or TOP will be reduced to 50 if higher. Use ORDER BY to get meaningful sample data.',
+            description: 'SELECT query to execute. Supports JOINs, CTEs (WITH), subqueries, WHERE, GROUP BY, HAVING, ORDER BY. Will be automatically limited to 100 rows if no TOP clause exists, or TOP will be reduced to 100 if higher (configurable via MAX_QUERY_ROWS). Use ORDER BY to get meaningful sample data.',
           },
           parameters: {
             type: 'object',
