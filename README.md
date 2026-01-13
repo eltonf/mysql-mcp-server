@@ -183,6 +183,54 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 
 Completely quit and restart Claude Desktop for changes to take effect.
 
+## Configuration
+
+### Environment Variables (`.env`)
+
+Required:
+```env
+DB_SERVER=your-server.domain.com
+DB_USER=mcp_schema_only
+DB_PASSWORD=YourPassword123!
+```
+
+For data queries (optional):
+```env
+SCHEMA_ONLY_MODE=false
+QUERY_ACCESS_CONFIG=/path/to/query-access.json
+MAX_QUERY_ROWS=100
+```
+
+See `.env.example` for all available options.
+
+### Query Access Control (`query-access.json`)
+
+**Required for `execute_query` tool.** Controls which tables and columns the LLM can access.
+
+```json
+{
+  "requireExplicitColumns": true,
+  "databases": {
+    "LASSO": {
+      "tables": {
+        "mode": "whitelist",
+        "list": ["Player", "Team", "Game"]
+      },
+      "columnExclusions": {
+        "Player": ["SSN", "Medical", "Grade"]
+      }
+    }
+  }
+}
+```
+
+Set the config path:
+```bash
+QUERY_ACCESS_CONFIG=/path/to/query-access.json
+```
+
+See [QUERY_ACCESS_SETUP.md](QUERY_ACCESS_SETUP.md) for detailed configuration options and examples.
+
 ## Usage
 
 Ask Claude to query your databases:
@@ -448,6 +496,7 @@ MIT
 ## Support
 
 For issues and questions, see:
+- [QUERY_ACCESS_SETUP.md](QUERY_ACCESS_SETUP.md) - Query access control configuration
 - [TESTING.md](TESTING.md) - Testing and troubleshooting guide
 - [AUTHENTICATION.md](AUTHENTICATION.md) - Authentication details
 - [CLAUDE.md](CLAUDE.md) - Architecture and development guidance

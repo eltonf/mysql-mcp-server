@@ -6,6 +6,11 @@ import {
   buildDataQuerySQL,
   QueryModificationResult,
 } from '../db/queries.js';
+import {
+  validateQueryAccess,
+  getAccessControlConfig,
+  isAccessControlInitialized,
+} from '../security/access-control.js';
 
 // Get max rows from environment or default to 100
 const MAX_QUERY_ROWS = parseInt(process.env.MAX_QUERY_ROWS || '100', 10);
@@ -48,6 +53,17 @@ export async function executeQuery(args: {
     // Step 1: Validate query safety (SELECT-only)
     validateQuerySafety(query);
     logger.debug('Query passed safety validation');
+
+    // Step 1.5: Validate access control (REQUIRED - restrictive by default)
+    if (!isAccessControlInitialized()) {
+      throw new Error(
+        'Access control not configured. Data queries are blocked until QUERY_ACCESS_CONFIG is set. ' +
+        'Create a query access config file and set QUERY_ACCESS_CONFIG environment variable to enable queries.'
+      );
+    }
+    const accessConfig = getAccessControlConfig();
+    validateQueryAccess(query, database, accessConfig);
+    logger.debug('Query passed access control validation');
 
     // Step 2: Enforce row limit
     const modResult: QueryModificationResult = enforceRowLimit(query, MAX_QUERY_ROWS);

@@ -1,0 +1,35 @@
+{
+  "requireExplicitColumns": true,
+  "databases": {
+    "LASSO": {
+      "schemas": {
+        "dbo": {
+          "tables": {
+            "mode": "whitelist",
+            "list": ["Player", "Team", "Game", "Coach", "School"],
+            "columnExclusions": {
+              "Player": ["Grade", "Medical", "SSN", "DateOfBirth"],
+              "Coach": ["Salary", "SSN"]
+            }
+          }
+        },
+        "archive": {
+          "tables": {
+            "mode": "blacklist",
+            "list": ["AuditLog", "DeletedRecords", "SensitiveData"]
+          }
+        }
+      }
+    },
+    "PRISM": {
+      "schemas": {
+        "*": {
+          "tables": {
+            "mode": "whitelist",
+            "list": ["Player", "School", "Evaluation", "Position"]
+          }
+        }
+      }
+    }
+  }
+}

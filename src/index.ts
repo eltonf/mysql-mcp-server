@@ -17,6 +17,10 @@ import { validateDatabaseObject } from './handlers/validation.js';
 import { findRoutines, getRoutineDefinition, getRoutinesSchema } from './handlers/routines.js';
 import { getViewDefinition } from './handlers/views.js';
 import { executeQuery } from './handlers/data.js';
+import {
+  loadAccessControlConfig,
+  initAccessControl,
+} from './security/access-control.js';
 
 config();
 
@@ -507,6 +511,24 @@ async function main() {
       logger.info('SCHEMA_ONLY_MODE enabled - data query tools disabled');
     } else {
       logger.info('Full access mode - all tools available');
+
+      // Initialize access control for data queries (REQUIRED for data query access)
+      // Restrictive by default: queries are blocked until QUERY_ACCESS_CONFIG is set
+      if (process.env.QUERY_ACCESS_CONFIG) {
+        try {
+          const accessConfig = loadAccessControlConfig();
+          initAccessControl(accessConfig);
+          logger.info('Access control enabled for data queries');
+        } catch (error: any) {
+          logger.error('Failed to load access control config:', error.message);
+          logger.error('Data queries will be blocked until config is fixed');
+          // Don't exit - server can still function for schema tools
+          // Data queries will fail with descriptive access control errors
+        }
+      } else {
+        logger.warn('QUERY_ACCESS_CONFIG not set - data queries will be BLOCKED');
+        logger.warn('Set QUERY_ACCESS_CONFIG environment variable to enable execute_query');
+      }
     }
 
     // Start MCP server
