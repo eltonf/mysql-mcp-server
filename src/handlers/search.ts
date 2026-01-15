@@ -38,40 +38,50 @@ export async function findTables(args: {
   }
 }
 
-// Result type for search_objects - columnName omitted when null
+// Result type for search_objects - null fields omitted
 interface ObjectSearchResult {
   schemaName: string;
-  tableName: string;
+  tableName?: string;
   columnName?: string;
+  routineName?: string;
 }
 
 export async function searchObjects(args: {
   database: string;
   search: string;
   schema?: string;
+  type?: string; // single type filter: 'table', 'column', or 'routine'
 }): Promise<ObjectSearchResult[]> {
-  const { database, search, schema } = args;
+  const { database, search, schema, type } = args;
+
+  // Convert single type to array for query builder
+  const types = type ? [type] : null;
 
   try {
-    const query = buildSearchObjectsQuery(database, schema || null, search);
+    const query = buildSearchObjectsQuery(database, schema || null, search, types);
     const result = await db.query(query);
 
     // Parse JSON result - SQL Server returns JSON as JsonResult column
     const jsonRow: any = result.recordset[0];
     if (!jsonRow?.JsonResult) {
-      logger.info('No tables or columns found matching search');
+      logger.info('No objects found matching search');
       return [];
     }
 
-    const rawResults: Array<{ schemaName: string; tableName: string; columnName: string | null }> =
-      JSON.parse(jsonRow.JsonResult);
+    const rawResults: Array<{
+      schemaName: string;
+      tableName: string | null;
+      columnName: string | null;
+      routineName: string | null;
+    }> = JSON.parse(jsonRow.JsonResult);
 
-    // Strip null columnName fields
+    // Strip null fields for cleaner output
     const results: ObjectSearchResult[] = rawResults.map((row) => {
-      if (row.columnName === null) {
-        return { schemaName: row.schemaName, tableName: row.tableName };
-      }
-      return { schemaName: row.schemaName, tableName: row.tableName, columnName: row.columnName };
+      const result: ObjectSearchResult = { schemaName: row.schemaName };
+      if (row.tableName !== null) result.tableName = row.tableName;
+      if (row.columnName !== null) result.columnName = row.columnName;
+      if (row.routineName !== null) result.routineName = row.routineName;
+      return result;
     });
 
     logger.info(`Found ${results.length} matches for '${search}' in ${database}`);

@@ -336,48 +336,81 @@ SELECT (
 }
 
 /**
- * Search for tables and columns containing a search string
- * Uses UNION to find both table name matches and column name matches
+ * Search for tables, columns, and routines containing a search string
+ * Uses UNION to combine matches from different object types
  */
 export function buildSearchObjectsQuery(
   database: string,
   schemaName: string | null,
-  search: string
+  search: string,
+  includeTypes: string[] | null // null or empty = all types; subset of ['table', 'column', 'routine']
 ): string {
   const schemaFilter = schemaName ? `AND s.name = '${schemaName.replace(/'/g, "''")}'` : '';
   const searchPattern = `'%${search.replace(/\*/g, '%').replace(/\?/g, '_').replace(/'/g, "''")}%'`;
+
+  // Determine which types to include
+  const includeAll = !includeTypes || includeTypes.length === 0;
+  const includeTables = includeAll || includeTypes.includes('table');
+  const includeColumns = includeAll || includeTypes.includes('column');
+  const includeRoutines = includeAll || includeTypes.includes('routine');
+
+  // Build query parts
+  const tableQuery = `
+  SELECT
+    s.name AS schemaName,
+    t.name AS tableName,
+    CAST(NULL AS NVARCHAR(128)) AS columnName,
+    CAST(NULL AS NVARCHAR(128)) AS routineName
+  FROM sys.tables t
+  INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+  WHERE t.name LIKE ${searchPattern}
+  ${schemaFilter}`;
+
+  const columnQuery = `
+  SELECT
+    s.name AS schemaName,
+    t.name AS tableName,
+    c.name AS columnName,
+    CAST(NULL AS NVARCHAR(128)) AS routineName
+  FROM sys.columns c
+  INNER JOIN sys.tables t ON c.object_id = t.object_id
+  INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+  WHERE c.name LIKE ${searchPattern}
+  ${schemaFilter}`;
+
+  const routineQuery = `
+  SELECT
+    s.name AS schemaName,
+    CAST(NULL AS NVARCHAR(128)) AS tableName,
+    CAST(NULL AS NVARCHAR(128)) AS columnName,
+    o.name AS routineName
+  FROM sys.objects o
+  INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+  WHERE o.type IN ('P', 'FN', 'IF', 'TF')
+  AND o.name LIKE ${searchPattern}
+  ${schemaFilter}`;
+
+  // Combine selected parts with UNION
+  const parts: string[] = [];
+  if (includeTables) parts.push(tableQuery);
+  if (includeColumns) parts.push(columnQuery);
+  if (includeRoutines) parts.push(routineQuery);
+
+  // Handle edge case where no types selected (shouldn't happen, but return empty)
+  if (parts.length === 0) {
+    return `USE [${database}]; SELECT NULL AS JsonResult WHERE 1=0;`;
+  }
 
   return `
 USE [${database}];
 
 ;WITH SearchResults AS (
-  -- Tables matching search term (no column match)
-  SELECT
-    s.name AS schemaName,
-    t.name AS tableName,
-    CAST(NULL AS NVARCHAR(128)) AS columnName
-  FROM sys.tables t
-  INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-  WHERE t.name LIKE ${searchPattern}
-  ${schemaFilter}
-
-  UNION
-
-  -- Columns matching search term (includes table name)
-  SELECT
-    s.name AS schemaName,
-    t.name AS tableName,
-    c.name AS columnName
-  FROM sys.columns c
-  INNER JOIN sys.tables t ON c.object_id = t.object_id
-  INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-  WHERE c.name LIKE ${searchPattern}
-  ${schemaFilter}
+  ${parts.join('\n  UNION\n')}
 )
 SELECT (
-  SELECT schemaName, tableName, columnName
+  SELECT schemaName, tableName, columnName, routineName
   FROM SearchResults
-  ORDER BY schemaName, tableName, columnName
+  ORDER BY schemaName, tableName, columnName, routineName
   FOR JSON PATH
 ) AS JsonResult;
 `;

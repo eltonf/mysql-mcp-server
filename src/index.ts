@@ -132,6 +132,11 @@ const tools: Tool[] = [
           type: 'string',
           description: 'Filter by schema name (default: search all schemas)',
         },
+        type: {
+          type: 'string',
+          enum: ['table', 'column', 'routine'],
+          description: 'Filter results to a single object type. Options: table (table names), column (column names), routine (stored procedures/functions). Default: all types.',
+        },
       },
       required: ['database', 'search'],
     },
