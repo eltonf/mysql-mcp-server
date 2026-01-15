@@ -206,7 +206,7 @@ Execute SELECT queries with automatic safety controls, access control filtering,
 - **REQUIRES access control config**: Set `QUERY_ACCESS_CONFIG` environment variable pointing to JSON config file
 - **Automatic row limit**: All queries limited to 100 rows max (configurable via MAX_QUERY_ROWS environment variable in MCP client config)
 - **Query validation**: Only SELECT allowed - blocks INSERT/UPDATE/DELETE/EXEC/DROP/ALTER
-- **Access control**: Table whitelist/blacklist, column exclusions, SELECT * blocking (see Query Access Control section)
+- **Access control**: Table whitelist/blacklist, column access (inclusion/exclusion modes), SELECT * blocking (see Query Access Control section)
 - **Transparent modifications**: Response includes:
   - `originalQuery`: What you sent
   - `executedQuery`: What actually ran
@@ -390,7 +390,9 @@ The `execute_query` tool includes granular access control to prevent sensitive d
 
 **Key features:**
 - Table whitelist/blacklist per database and schema
-- Column-level exclusions (hide sensitive columns like SSN, Salary, Medical)
+- Column-level access control with two modes:
+  - `inclusion` (whitelist): Only listed columns can be queried - **most secure, prevents new column exposure**
+  - `exclusion` (blacklist): Listed columns are blocked - easier to maintain but less secure
 - Mandatory explicit column selection (blocks `SELECT *` and `table.*`)
 - Informative error messages for blocked queries
 
@@ -415,10 +417,20 @@ Hierarchical structure: `database → schema → table → column`
         "dbo": {
           "tables": {
             "mode": "whitelist",
-            "list": ["Player", "Team", "Game", "Coach"],
-            "columnExclusions": {
-              "Player": ["Grade", "Medical", "SSN", "DateOfBirth"],
-              "Coach": ["Salary", "SSN"]
+            "list": ["Player", "Team", "Game", "Coach", "Credentials"],
+            "columnAccess": {
+              "Player": {
+                "mode": "exclusion",
+                "columns": ["Grade", "Medical", "SSN", "DateOfBirth"]
+              },
+              "Coach": {
+                "mode": "exclusion",
+                "columns": ["Salary", "SSN"]
+              },
+              "Credentials": {
+                "mode": "inclusion",
+                "columns": ["UserId", "Status", "LastLogin"]
+              }
             }
           }
         },
@@ -454,7 +466,9 @@ Hierarchical structure: `database → schema → table → column`
 | `databases.[db].tables` | object | No | Shorthand when not using per-schema config |
 | `tables.mode` | string | Yes | `"whitelist"`, `"blacklist"`, or `"none"` |
 | `tables.list` | string[] | Yes | Table names (case-insensitive matching) |
-| `columnExclusions` | object | No | Map of table name → excluded column names |
+| `columnAccess` | object | No | Map of table name → column access policy |
+| `columnAccess.[table].mode` | string | Yes | `"inclusion"` (whitelist) or `"exclusion"` (blacklist) |
+| `columnAccess.[table].columns` | string[] | Yes | Column names for the policy |
 
 ### Table Mode Behaviors
 
@@ -462,7 +476,16 @@ Hierarchical structure: `database → schema → table → column`
 |------|----------|
 | `whitelist` | Only tables in `list` can be queried. All others blocked. |
 | `blacklist` | Tables in `list` are blocked. All others allowed. |
-| `none` | No table-level restrictions (column exclusions still apply) |
+| `none` | No table-level restrictions (column access rules still apply) |
+
+### Column Access Mode Behaviors
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `inclusion` | Only columns in `columns` array can be queried. All others blocked. | **Recommended for sensitive tables** - new columns are blocked by default |
+| `exclusion` | Columns in `columns` array are blocked. All others allowed. | Easier maintenance but less secure - new columns are allowed by default |
+
+**Security recommendation:** Use `inclusion` mode for tables containing sensitive data. This ensures that when new columns are added to the database, they are blocked until explicitly added to the allowed list.
 
 ### Schema Wildcards
 
@@ -493,10 +516,13 @@ For simpler configs (single database, all schemas), omit the `schemas` level:
     "LASSO": {
       "tables": {
         "mode": "whitelist",
-        "list": ["Player", "Team", "Game"]
-      },
-      "columnExclusions": {
-        "Player": ["Grade", "Medical"]
+        "list": ["Player", "Team", "Game"],
+        "columnAccess": {
+          "Player": {
+            "mode": "exclusion",
+            "columns": ["Grade", "Medical"]
+          }
+        }
       }
     }
   }
@@ -515,7 +541,9 @@ Access violations return clear, actionable messages:
 | SELECT table.* | `SELECT t.* is not allowed. Please specify columns explicitly.` |
 | Table not in whitelist | `Table 'LASSO.dbo.Credentials' is not in the allowed tables list. Allowed tables for LASSO.dbo: Player, Team, Game` |
 | Blocked table | `Table 'LASSO.dbo.AuditLog' cannot be queried. This table is in the exclusion list.` |
-| Excluded column | `Column 'Grade' from 'LASSO.dbo.Player' cannot be selected. Excluded columns: Grade, Medical, SSN` |
+| Excluded column (exclusion mode) | `Column 'SSN' from 'LASSO.dbo.Player' cannot be selected. Excluded columns: SSN, Medical, Grade` |
+| Column not allowed (inclusion mode) | `Column 'Secret' from 'LASSO.dbo.Credentials' cannot be selected. Allowed columns for Credentials: UserId, Status, LastLogin` |
+| Old config format | `Database 'LASSO' uses deprecated 'columnExclusions' format. Please migrate to 'columnAccess' with { mode: 'exclusion' | 'inclusion', columns: [...] } per table.` |
 
 ### Implementation Files
 
@@ -536,8 +564,7 @@ To allow all queries on a specific database:
       "tables": {
         "mode": "none",
         "list": []
-      },
-      "columnExclusions": {}
+      }
     }
   }
 }
@@ -564,10 +591,16 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed instructions.
 
 ## Recent Changes
 
+- **Column access policy modes** (Jan 2026) - Enhanced column-level access control with inclusion/exclusion modes:
+  - New unified `columnAccess` config structure with per-table `mode` field
+  - `inclusion` mode (whitelist): Only listed columns can be queried - **recommended for sensitive tables**
+  - `exclusion` mode (blacklist): Listed columns are blocked - maintains previous behavior
+  - Old `columnExclusions` format now throws an error with migration instructions
+  - Prevents security gaps when new columns are added to the database
 - **Query access control** (Jan 2026) - Added granular table/column access control for `execute_query`:
   - Hierarchical config: database → schema → table → column
   - Table whitelist/blacklist per database and schema
-  - Column-level exclusions to hide sensitive data (SSN, Salary, Medical, etc.)
+  - Column-level access control to hide sensitive data (SSN, Salary, Medical, etc.)
   - Blocks `SELECT *` and `table.*` (configurable via `requireExplicitColumns`)
   - Restrictive by default - queries blocked until `QUERY_ACCESS_CONFIG` is set
   - Uses `node-sql-parser` for reliable SQL parsing

@@ -7,7 +7,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { AccessControlConfig, DatabaseConfig, TableConfig, SchemaConfig } from './types.js';
+import {
+  AccessControlConfig,
+  DatabaseConfig,
+  TableConfig,
+  SchemaConfig,
+  ColumnAccessPolicy,
+} from './types.js';
 import { logger } from '../utils/logger.js';
 
 // Environment variable for config file path
@@ -96,6 +102,15 @@ function validateDatabaseConfig(dbName: string, raw: any): DatabaseConfig {
     throw new Error(`Database config for '${dbName}' must be an object`);
   }
 
+  // Error on deprecated columnExclusions format
+  if (raw.columnExclusions) {
+    throw new Error(
+      `Database '${dbName}' uses deprecated 'columnExclusions' format. ` +
+        `Please migrate to 'columnAccess' with { mode: 'exclusion' | 'inclusion', columns: [...] } per table. ` +
+        `See documentation for the new format.`
+    );
+  }
+
   const result: DatabaseConfig = {};
 
   // Check for schema-level config (full format)
@@ -117,11 +132,6 @@ function validateDatabaseConfig(dbName: string, raw: any): DatabaseConfig {
   // Check for compact format (tables at database level)
   if (raw.tables) {
     result.tables = validateTableConfig(dbName, '_default_', raw.tables);
-  }
-
-  // Column exclusions at database level (compact format)
-  if (raw.columnExclusions) {
-    result.columnExclusions = validateColumnExclusions(dbName, raw.columnExclusions);
   }
 
   // Must have either schemas or tables
@@ -159,6 +169,15 @@ function validateTableConfig(dbName: string, schemaName: string, raw: any): Tabl
     throw new Error(`Table config for '${dbName}.${schemaName}' must be an object`);
   }
 
+  // Error on deprecated columnExclusions format
+  if (raw.columnExclusions) {
+    throw new Error(
+      `Table config for '${dbName}.${schemaName}' uses deprecated 'columnExclusions' format. ` +
+        `Please migrate to 'columnAccess' with { mode: 'exclusion' | 'inclusion', columns: [...] } per table. ` +
+        `See documentation for the new format.`
+    );
+  }
+
   // Validate mode
   const validModes = ['whitelist', 'blacklist', 'none'];
   if (!validModes.includes(raw.mode)) {
@@ -184,40 +203,62 @@ function validateTableConfig(dbName: string, schemaName: string, raw: any): Tabl
     list,
   };
 
-  // Optional column exclusions
-  if (raw.columnExclusions) {
-    result.columnExclusions = validateColumnExclusions(
-      `${dbName}.${schemaName}`,
-      raw.columnExclusions
-    );
+  // Optional column access policies
+  if (raw.columnAccess) {
+    result.columnAccess = validateColumnAccess(`${dbName}.${schemaName}`, raw.columnAccess);
   }
 
   return result;
 }
 
 /**
- * Validate column exclusions
+ * Validate column access policies
  */
-function validateColumnExclusions(context: string, raw: any): Record<string, string[]> {
+function validateColumnAccess(
+  context: string,
+  raw: any
+): Record<string, ColumnAccessPolicy> {
   if (typeof raw !== 'object' || raw === null) {
-    throw new Error(`Column exclusions for '${context}' must be an object`);
+    throw new Error(`Column access for '${context}' must be an object`);
   }
 
-  const result: Record<string, string[]> = {};
+  const result: Record<string, ColumnAccessPolicy> = {};
 
-  for (const [tableName, columns] of Object.entries(raw)) {
-    if (!Array.isArray(columns)) {
-      throw new Error(`Column exclusions for '${context}.${tableName}' must be an array`);
+  for (const [tableName, policy] of Object.entries(raw)) {
+    if (typeof policy !== 'object' || policy === null) {
+      throw new Error(
+        `Column access for '${context}.${tableName}' must be an object with 'mode' and 'columns'`
+      );
     }
 
-    result[tableName] = (columns as any[]).map((c: any) => {
+    const p = policy as any;
+
+    // Validate mode
+    const validModes = ['inclusion', 'exclusion'];
+    if (!validModes.includes(p.mode)) {
+      throw new Error(
+        `Column access mode for '${context}.${tableName}' must be 'inclusion' or 'exclusion'`
+      );
+    }
+
+    // Validate columns
+    if (!Array.isArray(p.columns)) {
+      throw new Error(`Column access for '${context}.${tableName}' must have 'columns' array`);
+    }
+
+    const columns = p.columns.map((c: any) => {
       if (typeof c !== 'string') {
         throw new Error(
-          `Column exclusions for '${context}.${tableName}' must contain only strings`
+          `Column access for '${context}.${tableName}' columns must contain only strings`
         );
       }
       return c;
     });
+
+    result[tableName] = {
+      mode: p.mode as 'inclusion' | 'exclusion',
+      columns,
+    };
   }
 
   return result;
@@ -230,7 +271,7 @@ export function getTableConfigForSchema(
   config: AccessControlConfig,
   database: string,
   schema: string
-): { tableConfig: TableConfig; columnExclusions: Record<string, string[]> } | null {
+): { tableConfig: TableConfig; columnAccess: Record<string, ColumnAccessPolicy> } | null {
   const dbConfig = config.databases[database.toUpperCase()];
   if (!dbConfig) {
     return null;
@@ -245,7 +286,7 @@ export function getTableConfigForSchema(
       const schemaConfig = dbConfig.schemas[schemaLower];
       return {
         tableConfig: schemaConfig.tables,
-        columnExclusions: schemaConfig.tables.columnExclusions || {},
+        columnAccess: schemaConfig.tables.columnAccess || {},
       };
     }
 
@@ -254,7 +295,7 @@ export function getTableConfigForSchema(
       const schemaConfig = dbConfig.schemas['*'];
       return {
         tableConfig: schemaConfig.tables,
-        columnExclusions: schemaConfig.tables.columnExclusions || {},
+        columnAccess: schemaConfig.tables.columnAccess || {},
       };
     }
 
@@ -266,7 +307,7 @@ export function getTableConfigForSchema(
   if (dbConfig.tables) {
     return {
       tableConfig: dbConfig.tables,
-      columnExclusions: dbConfig.tables.columnExclusions || dbConfig.columnExclusions || {},
+      columnAccess: dbConfig.tables.columnAccess || {},
     };
   }
 

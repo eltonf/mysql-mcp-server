@@ -7,9 +7,15 @@
           "tables": {
             "mode": "whitelist",
             "list": ["Player", "Team", "Game", "Coach", "School"],
-            "columnExclusions": {
-              "Player": ["Grade", "Medical", "SSN", "DateOfBirth"],
-              "Coach": ["Salary", "SSN"]
+            "columnAccess": {
+              "Player": {
+                "mode": "exclusion",
+                "columns": ["Grade", "Medical", "SSN", "DateOfBirth"]
+              },
+              "Coach": {
+                "mode": "exclusion",
+                "columns": ["Salary", "SSN"]
+              }
             }
           }
         },

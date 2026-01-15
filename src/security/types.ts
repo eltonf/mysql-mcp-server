@@ -5,11 +5,17 @@
  * database → schema → table → column
  */
 
+// Column-level access policy (per table)
+export interface ColumnAccessPolicy {
+  mode: 'inclusion' | 'exclusion';
+  columns: string[];
+}
+
 // Table-level configuration
 export interface TableConfig {
   mode: 'whitelist' | 'blacklist' | 'none';
   list: string[];
-  columnExclusions?: Record<string, string[]>;
+  columnAccess?: Record<string, ColumnAccessPolicy>;
 }
 
 // Schema-level configuration
@@ -23,7 +29,6 @@ export interface DatabaseConfig {
   schemas?: Record<string, SchemaConfig>;
   // Compact format: applies to all schemas
   tables?: TableConfig;
-  columnExclusions?: Record<string, string[]>;
 }
 
 // Root configuration
@@ -37,6 +42,7 @@ export type ViolationType =
   | 'select_star'
   | 'table_not_allowed'
   | 'column_excluded'
+  | 'column_not_allowed'
   | 'database_not_configured'
   | 'schema_not_configured';
 

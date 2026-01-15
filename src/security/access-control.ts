@@ -4,7 +4,7 @@
  * Validates SQL queries against access control configuration:
  * - Database access (must be configured)
  * - Table whitelist/blacklist
- * - Column exclusions
+ * - Column access (inclusion/exclusion modes)
  * - SELECT * blocking
  */
 
@@ -192,7 +192,7 @@ function validateTableAccess(
 }
 
 /**
- * Validate column access against exclusion rules
+ * Validate column access against inclusion/exclusion rules
  */
 function validateColumnAccess(
   column: QualifiedColumnRef,
@@ -209,26 +209,55 @@ function validateColumnAccess(
     return null;
   }
 
-  const { columnExclusions } = schemaConfig;
+  const { columnAccess } = schemaConfig;
   const tableNameLower = column.table.toLowerCase();
   const columnNameLower = column.column.toLowerCase();
 
-  // Check for excluded columns
-  for (const [table, excludedColumns] of Object.entries(columnExclusions)) {
+  // Find policy for this table (case-insensitive)
+  let policy = null;
+  let policyTableName = '';
+  for (const [table, tablePolicy] of Object.entries(columnAccess)) {
     if (table.toLowerCase() === tableNameLower) {
-      const excludedLower = excludedColumns.map(c => c.toLowerCase());
-      if (excludedLower.includes(columnNameLower)) {
-        return {
-          type: 'column_excluded',
-          database: column.database,
-          schema: column.schema,
-          table: column.table,
-          column: column.column,
-          message:
-            `Column '${column.column}' from '${column.database}.${column.schema}.${column.table}' cannot be selected. ` +
-            `Excluded columns for ${column.database}.${column.schema}.${column.table}: ${excludedColumns.join(', ')}`,
-        };
-      }
+      policy = tablePolicy;
+      policyTableName = table;
+      break;
+    }
+  }
+
+  // No policy = allow all columns
+  if (!policy) {
+    return null;
+  }
+
+  const columnsLower = policy.columns.map(c => c.toLowerCase());
+
+  if (policy.mode === 'inclusion') {
+    // Whitelist: column must be in the list
+    if (!columnsLower.includes(columnNameLower)) {
+      return {
+        type: 'column_not_allowed',
+        database: column.database,
+        schema: column.schema,
+        table: column.table,
+        column: column.column,
+        message:
+          `Column '${column.column}' from '${column.database}.${column.schema}.${column.table}' cannot be selected. ` +
+          `Allowed columns for ${policyTableName}: ${policy.columns.join(', ')}`,
+      };
+    }
+  } else {
+    // Blacklist: column must NOT be in the list
+    if (columnsLower.includes(columnNameLower)) {
+      return {
+        type: 'column_excluded',
+        database: column.database,
+        schema: column.schema,
+        table: column.table,
+        column: column.column,
+        message:
+          `Column '${column.column}' from '${column.database}.${column.schema}.${column.table}' cannot be selected. ` +
+          `Excluded columns: ${policy.columns.join(', ')}`,
+      };
     }
   }
 
