@@ -24,6 +24,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "mssql": "^11.0.1",
+    "node-sql-parser": "^5.3.6",
     "zod": "^3.24.1",
     "winston": "^3.17.0",
     "dotenv": "^16.4.7"

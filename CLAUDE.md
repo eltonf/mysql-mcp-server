@@ -29,9 +29,15 @@ src/
 │   ├── schema.ts           # get_schema, get_table_info implementations
 │   ├── search.ts           # find_tables with pattern matching
 │   ├── relationships.ts    # get_relationships for JOIN discovery
-│   └── validation.ts       # validate_objects with fuzzy matching
+│   ├── validation.ts       # validate_objects with fuzzy matching
+│   └── data.ts             # execute_query with access control
+├── security/
+│   ├── types.ts            # Access control TypeScript interfaces
+│   ├── config-loader.ts    # JSON config file loader
+│   └── access-control.ts   # Query access validation logic
 └── utils/
-    └── logger.ts           # Winston-based logging
+    ├── logger.ts           # Winston-based logging
+    └── sql-parser.ts       # SQL parsing for access control
 ```
 
 ### Authentication Support
@@ -193,12 +199,14 @@ Get complete definition of a view including SQL source code (CREATE VIEW stateme
 - Returns: View definition, columns, source code
 - Auto-detects schema if not specified
 
-### execute_query (Data Query Tool - requires SCHEMA_ONLY_MODE=false)
-Execute SELECT queries with automatic safety controls and transparent modification feedback.
+### execute_query (Data Query Tool - requires SCHEMA_ONLY_MODE=false + QUERY_ACCESS_CONFIG)
+Execute SELECT queries with automatic safety controls, access control filtering, and transparent modification feedback.
 - Parameters: `database`, `query`, `parameters?` (optional)
 - Supports: Complex JOINs, CTEs (WITH), subqueries, aggregations, GROUP BY, HAVING, ORDER BY
+- **REQUIRES access control config**: Set `QUERY_ACCESS_CONFIG` environment variable pointing to JSON config file
 - **Automatic row limit**: All queries limited to 100 rows max (configurable via MAX_QUERY_ROWS environment variable in MCP client config)
 - **Query validation**: Only SELECT allowed - blocks INSERT/UPDATE/DELETE/EXEC/DROP/ALTER
+- **Access control**: Table whitelist/blacklist, column exclusions, SELECT * blocking (see Query Access Control section)
 - **Transparent modifications**: Response includes:
   - `originalQuery`: What you sent
   - `executedQuery`: What actually ran
@@ -287,6 +295,12 @@ Optional:
 - `MCP_SERVER_NAME` - Server name for MCP (default: sql-server-tools)
 - `MCP_SERVER_VERSION` - Server version (default: 1.0.0)
 
+Data query specific:
+- `SCHEMA_ONLY_MODE` - If `true`, disables data query tools entirely (default: false)
+- `QUERY_ACCESS_CONFIG` - Path to JSON config file for table/column access control (REQUIRED for execute_query)
+- `MAX_QUERY_ROWS` - Maximum rows returned per query (default: 100)
+- `QUERY_TIMEOUT_MS` - Query timeout in milliseconds (default: 30000)
+
 ## Key Files for Modification
 
 ### Adding a new MCP tool
@@ -364,9 +378,170 @@ Implementation details:
 ### Best Practices
 
 - **Schema-only deployment**: Use `mcp_schema_only` user + `SCHEMA_ONLY_MODE=true`
-- **Full access deployment**: Use `mcp_full_access` user + `SCHEMA_ONLY_MODE=false`
+- **Full access deployment**: Use `mcp_full_access` user + `SCHEMA_ONLY_MODE=false` + `QUERY_ACCESS_CONFIG`
 - **Never** give data read permissions to schema-only users - enforce at DB level
 - **Always** check `SCHEMA_ONLY_MODE` before registering new data query tools
+
+## Query Access Control
+
+### Overview
+
+The `execute_query` tool includes granular access control to prevent sensitive data exposure. Access control is **restrictive by default** - queries are blocked until a configuration file is set up.
+
+**Key features:**
+- Table whitelist/blacklist per database and schema
+- Column-level exclusions (hide sensitive columns like SSN, Salary, Medical)
+- Mandatory explicit column selection (blocks `SELECT *` and `table.*`)
+- Informative error messages for blocked queries
+
+### Configuration File
+
+Set the `QUERY_ACCESS_CONFIG` environment variable to point to your JSON config file:
+
+```bash
+QUERY_ACCESS_CONFIG=/path/to/query-access.json
+```
+
+### Config File Structure
+
+Hierarchical structure: `database → schema → table → column`
+
+```json
+{
+  "requireExplicitColumns": true,
+  "databases": {
+    "LASSO": {
+      "schemas": {
+        "dbo": {
+          "tables": {
+            "mode": "whitelist",
+            "list": ["Player", "Team", "Game", "Coach"],
+            "columnExclusions": {
+              "Player": ["Grade", "Medical", "SSN", "DateOfBirth"],
+              "Coach": ["Salary", "SSN"]
+            }
+          }
+        },
+        "archive": {
+          "tables": {
+            "mode": "blacklist",
+            "list": ["AuditLog", "DeletedRecords"]
+          }
+        }
+      }
+    },
+    "PRISM": {
+      "schemas": {
+        "*": {
+          "tables": {
+            "mode": "whitelist",
+            "list": ["Player", "School", "Evaluation"]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Configuration Options
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `requireExplicitColumns` | boolean | Yes | If true, blocks `SELECT *` and `table.*` |
+| `databases` | object | Yes | Map of database name → database config |
+| `databases.[db].schemas` | object | No | Map of schema name → schema config (use `"*"` for all schemas) |
+| `databases.[db].tables` | object | No | Shorthand when not using per-schema config |
+| `tables.mode` | string | Yes | `"whitelist"`, `"blacklist"`, or `"none"` |
+| `tables.list` | string[] | Yes | Table names (case-insensitive matching) |
+| `columnExclusions` | object | No | Map of table name → excluded column names |
+
+### Table Mode Behaviors
+
+| Mode | Behavior |
+|------|----------|
+| `whitelist` | Only tables in `list` can be queried. All others blocked. |
+| `blacklist` | Tables in `list` are blocked. All others allowed. |
+| `none` | No table-level restrictions (column exclusions still apply) |
+
+### Schema Wildcards
+
+Use `"*"` as schema name to apply rules to all schemas in a database:
+
+```json
+{
+  "databases": {
+    "PRISM": {
+      "schemas": {
+        "*": {
+          "tables": { "mode": "whitelist", "list": ["Player", "School"] }
+        }
+      }
+    }
+  }
+}
+```
+
+### Compact Format
+
+For simpler configs (single database, all schemas), omit the `schemas` level:
+
+```json
+{
+  "requireExplicitColumns": true,
+  "databases": {
+    "LASSO": {
+      "tables": {
+        "mode": "whitelist",
+        "list": ["Player", "Team", "Game"]
+      },
+      "columnExclusions": {
+        "Player": ["Grade", "Medical"]
+      }
+    }
+  }
+}
+```
+
+### Error Messages
+
+Access violations return clear, actionable messages:
+
+| Scenario | Example Error Message |
+|----------|----------------------|
+| No config | `Access control not configured. Data queries are blocked until QUERY_ACCESS_CONFIG is set.` |
+| Unknown database | `Database 'UnknownDB' is not configured for query access. Add it to QUERY_ACCESS_CONFIG.` |
+| SELECT * | `SELECT * is not allowed. All SELECT statements must explicitly list columns.` |
+| SELECT table.* | `SELECT t.* is not allowed. Please specify columns explicitly.` |
+| Table not in whitelist | `Table 'LASSO.dbo.Credentials' is not in the allowed tables list. Allowed tables for LASSO.dbo: Player, Team, Game` |
+| Blocked table | `Table 'LASSO.dbo.AuditLog' cannot be queried. This table is in the exclusion list.` |
+| Excluded column | `Column 'Grade' from 'LASSO.dbo.Player' cannot be selected. Excluded columns: Grade, Medical, SSN` |
+
+### Implementation Files
+
+- **Types**: [src/security/types.ts](src/security/types.ts) - TypeScript interfaces
+- **Config loader**: [src/security/config-loader.ts](src/security/config-loader.ts) - JSON validation and loading
+- **Validation**: [src/security/access-control.ts](src/security/access-control.ts) - Query access validation
+- **SQL Parser**: [src/utils/sql-parser.ts](src/utils/sql-parser.ts) - Parses SQL to extract tables/columns
+
+### Disabling Access Control (Permissive Mode)
+
+To allow all queries on a specific database:
+
+```json
+{
+  "requireExplicitColumns": false,
+  "databases": {
+    "LASSO": {
+      "tables": {
+        "mode": "none",
+        "list": []
+      },
+      "columnExclusions": {}
+    }
+  }
+}
+```
 
 ## Common Pitfalls
 
@@ -389,6 +564,14 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed instructions.
 
 ## Recent Changes
 
+- **Query access control** (Jan 2026) - Added granular table/column access control for `execute_query`:
+  - Hierarchical config: database → schema → table → column
+  - Table whitelist/blacklist per database and schema
+  - Column-level exclusions to hide sensitive data (SSN, Salary, Medical, etc.)
+  - Blocks `SELECT *` and `table.*` (configurable via `requireExplicitColumns`)
+  - Restrictive by default - queries blocked until `QUERY_ACCESS_CONFIG` is set
+  - Uses `node-sql-parser` for reliable SQL parsing
+  - New files: `src/security/types.ts`, `src/security/config-loader.ts`, `src/security/access-control.ts`, `src/utils/sql-parser.ts`
 - **Data query capability** (Oct 2025) - Added `execute_query` tool for running SELECT queries with automatic safety controls:
   - Automatic TOP 100 row limit (configurable via MAX_QUERY_ROWS env var in MCP client config)
   - Transparent modification feedback - response shows if/how query was changed

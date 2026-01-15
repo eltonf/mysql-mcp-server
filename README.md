@@ -183,6 +183,90 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 
 Completely quit and restart Claude Desktop for changes to take effect.
 
+## Configuration
+
+### Environment Variables (`.env`)
+
+Required:
+```env
+DB_SERVER=your-server.domain.com
+DB_USER=mcp_schema_only
+DB_PASSWORD=YourPassword123!
+```
+
+For data queries, also set:
+```env
+SCHEMA_ONLY_MODE=false
+MAX_QUERY_ROWS=100
+```
+
+See `.env.example` for all available options.
+
+### Query Access Control (`query-access.json`)
+
+**Required for `execute_query` tool.** Controls which tables and columns the LLM can access.
+
+```json
+{
+  "requireExplicitColumns": true,
+  "databases": {
+    "LASSO": {
+      "schemas": {
+        "dbo": {
+          "tables": {
+            "mode": "whitelist",
+            "list": ["Player", "Team", "Game"],
+            "columnExclusions": {
+              "Player": ["SSN", "Medical", "Grade"]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Important:** `QUERY_ACCESS_CONFIG` must be set in your **MCP client config**, not in `.env`. This is because MCP clients launch the server as a subprocess and pass environment variables through their configuration.
+
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "sql-server-mcp": {
+      "command": "node",
+      "args": ["/path/to/sql-server-mcp/dist/index.js"],
+      "env": {
+        "DB_SERVER": "your-server.domain.com",
+        "DB_USER": "mcp_user",
+        "DB_PASSWORD": "your_password",
+        "QUERY_ACCESS_CONFIG": "/path/to/query-access.json"
+      }
+    }
+  }
+}
+```
+
+**Claude Code** (`~/.claude.json` under `mcpServers`):
+```json
+{
+  "mcpServers": {
+    "sql-server": {
+      "command": "node",
+      "args": ["/path/to/sql-server-mcp/dist/index.js"],
+      "env": {
+        "DB_SERVER": "your-server.domain.com",
+        "DB_USER": "mcp_user",
+        "DB_PASSWORD": "your_password",
+        "QUERY_ACCESS_CONFIG": "/path/to/query-access.json"
+      }
+    }
+  }
+}
+```
+
+See [QUERY_ACCESS_SETUP.md](QUERY_ACCESS_SETUP.md) for detailed configuration options and examples.
+
 ## Usage
 
 Ask Claude to query your databases:
@@ -448,6 +532,7 @@ MIT
 ## Support
 
 For issues and questions, see:
+- [QUERY_ACCESS_SETUP.md](QUERY_ACCESS_SETUP.md) - Query access control configuration
 - [TESTING.md](TESTING.md) - Testing and troubleshooting guide
 - [AUTHENTICATION.md](AUTHENTICATION.md) - Authentication details
 - [CLAUDE.md](CLAUDE.md) - Architecture and development guidance
