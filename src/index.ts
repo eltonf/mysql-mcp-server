@@ -11,7 +11,7 @@ import { config } from 'dotenv';
 import { db } from './db/connection.js';
 import { logger } from './utils/logger.js';
 import { getSchema, getTableInfo } from './handlers/schema.js';
-import { findTables } from './handlers/search.js';
+import { findTables, searchObjects } from './handlers/search.js';
 import { getRelationships } from './handlers/relationships.js';
 import { validateDatabaseObject } from './handlers/validation.js';
 import { findRoutines, getRoutineDefinition, getRoutinesSchema } from './handlers/routines.js';
@@ -112,6 +112,28 @@ const tools: Tool[] = [
         },
       },
       required: ['database'],
+    },
+  },
+  {
+    name: 'search_objects',
+    description: 'Search for tables and columns containing a search string. Returns tables with matching names AND tables that have columns with matching names. Supports wildcards (* and ?). Example: search="nfs" returns [{"schemaName":"dbo","tableName":"abcnfs"},{"schemaName":"dbo","tableName":"some_table","columnName":"mynfscolumn"}]',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
+        search: {
+          type: 'string',
+          description: 'Search string to find in table names or column names. Supports wildcards: * (any characters) or ? (single character). Case-insensitive.',
+        },
+        schema: {
+          type: 'string',
+          description: 'Filter by schema name (default: search all schemas)',
+        },
+      },
+      required: ['database', 'search'],
     },
   },
   {
@@ -346,6 +368,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'find_tables': {
         const result = await findTables(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'search_objects': {
+        const result = await searchObjects(args as any);
         return {
           content: [
             {

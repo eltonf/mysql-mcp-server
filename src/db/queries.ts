@@ -336,6 +336,54 @@ SELECT (
 }
 
 /**
+ * Search for tables and columns containing a search string
+ * Uses UNION to find both table name matches and column name matches
+ */
+export function buildSearchObjectsQuery(
+  database: string,
+  schemaName: string | null,
+  search: string
+): string {
+  const schemaFilter = schemaName ? `AND s.name = '${schemaName.replace(/'/g, "''")}'` : '';
+  const searchPattern = `'%${search.replace(/\*/g, '%').replace(/\?/g, '_').replace(/'/g, "''")}%'`;
+
+  return `
+USE [${database}];
+
+;WITH SearchResults AS (
+  -- Tables matching search term (no column match)
+  SELECT
+    s.name AS schemaName,
+    t.name AS tableName,
+    CAST(NULL AS NVARCHAR(128)) AS columnName
+  FROM sys.tables t
+  INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+  WHERE t.name LIKE ${searchPattern}
+  ${schemaFilter}
+
+  UNION
+
+  -- Columns matching search term (includes table name)
+  SELECT
+    s.name AS schemaName,
+    t.name AS tableName,
+    c.name AS columnName
+  FROM sys.columns c
+  INNER JOIN sys.tables t ON c.object_id = t.object_id
+  INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
+  WHERE c.name LIKE ${searchPattern}
+  ${schemaFilter}
+)
+SELECT (
+  SELECT schemaName, tableName, columnName
+  FROM SearchResults
+  ORDER BY schemaName, tableName, columnName
+  FOR JSON PATH
+) AS JsonResult;
+`;
+}
+
+/**
  * Get all relationships in a database
  */
 export function buildGetRelationshipsQuery(
