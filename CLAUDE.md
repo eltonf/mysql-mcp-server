@@ -199,6 +199,92 @@ Get complete definition of a view including SQL source code (CREATE VIEW stateme
 - Returns: View definition, columns, source code
 - Auto-detects schema if not specified
 
+### get_accessible_schema
+Shows all tables and columns accessible for SELECT queries based on the query access control configuration.
+- Parameters: `database`, `schema?` (optional filter)
+- Returns: List of accessible tables with their queryable columns
+- **REQUIRES**: `QUERY_ACCESS_CONFIG` environment variable to be set
+- Use this BEFORE `execute_query` to understand what data you can query
+- Respects whitelist/blacklist table rules and column inclusion/exclusion rules
+- Response includes:
+  - `database`: Database name
+  - `requireExplicitColumns`: Whether SELECT * is blocked
+  - `configuredSchemas`: List of schemas with access rules
+  - `tables[]`: Accessible tables with:
+    - `schema`, `name`, `type` (TABLE/VIEW)
+    - `columnAccessMode`: 'inclusion' or 'exclusion' (if column rules exist)
+    - `accessibleColumns[]`: Columns you can query
+    - `blockedColumns[]`: Columns blocked (exclusion mode only)
+    - `allowedColumnsList[]`: Columns in whitelist (inclusion mode only)
+
+**Example response:**
+```json
+{
+  "database": "LASSO",
+  "requireExplicitColumns": true,
+  "configuredSchemas": ["dbo", "*"],
+  "tables": [
+    {
+      "schema": "dbo",
+      "name": "Player",
+      "type": "TABLE",
+      "columnAccessMode": "exclusion",
+      "accessibleColumns": [
+        { "name": "PlayerID", "dataType": "int", "isPrimaryKey": true, ... },
+        { "name": "Name", "dataType": "nvarchar(100)", ... }
+      ],
+      "blockedColumns": ["Grade", "Medical", "SSN"]
+    }
+  ]
+}
+```
+
+### get_accessible_table_info
+Shows detailed column information for a specific table, with access status for each column.
+- Parameters: `database`, `table`, `schema?`
+- Returns: Full table schema with per-column access annotations
+- **REQUIRES**: `QUERY_ACCESS_CONFIG` environment variable to be set
+- Use this to check if specific columns are queryable before writing SELECT queries
+- Response includes:
+  - `isAccessible`: Whether the table can be queried at all
+  - `accessDeniedReason`: Why table is blocked (if not accessible)
+  - `columnAccessMode`: 'inclusion' or 'exclusion' (if column rules exist)
+  - `columns[]`: All columns with:
+    - Full metadata (name, type, nullable, isPrimaryKey, etc.)
+    - `isAccessible`: Whether this column can be queried
+    - `accessDeniedReason`: Why column is blocked (if not accessible)
+  - `accessibleColumnCount` / `totalColumnCount`: Summary counts
+  - `indexes[]`, `foreignKeys[]`: Table structure info
+
+**Example response (accessible table):**
+```json
+{
+  "database": "LASSO",
+  "schema": "dbo",
+  "table": "Player",
+  "type": "TABLE",
+  "isAccessible": true,
+  "columnAccessMode": "exclusion",
+  "columns": [
+    { "name": "PlayerID", "dataType": "int", "isAccessible": true },
+    { "name": "SSN", "dataType": "varchar(11)", "isAccessible": false, "accessDeniedReason": "Column in exclusion list: SSN, Medical, Grade" }
+  ],
+  "accessibleColumnCount": 15,
+  "totalColumnCount": 18
+}
+```
+
+**Example response (blocked table):**
+```json
+{
+  "database": "LASSO",
+  "schema": "dbo",
+  "table": "AuditLog",
+  "isAccessible": false,
+  "accessDeniedReason": "Table is in blacklist"
+}
+```
+
 ### execute_query (Data Query Tool - requires SCHEMA_ONLY_MODE=false + QUERY_ACCESS_CONFIG)
 Execute SELECT queries with automatic safety controls, access control filtering, and transparent modification feedback.
 - Parameters: `database`, `query`, `parameters?` (optional)
@@ -235,14 +321,19 @@ Execute SELECT queries with automatic safety controls, access control filtering,
 ```
 
 **Recommended LLM workflow:**
-1. Use `find_tables` to discover relevant tables
-2. Use `get_schema` or `get_table_info` to understand table structures
+1. Use `get_accessible_schema` to see what tables/columns you can actually query (respects access control)
+2. Use `get_accessible_table_info` for detailed column access info on specific tables
 3. Use `get_relationships` to identify foreign keys for JOINs
-4. Write SELECT query with JOINs, WHERE, ORDER BY as needed
+4. Write SELECT query with JOINs, WHERE, ORDER BY as needed (only use accessible columns!)
 5. Call `execute_query` with your query
 6. Check `wasModified` flag - if true, review `modifications` array
 7. Analyze sample data (max 100 rows by default) and refine query if needed
 8. If `limitReached` is true, consider adding more specific WHERE clauses or different ORDER BY
+
+**Alternative workflow (when access control not configured):**
+1. Use `find_tables` to discover relevant tables
+2. Use `get_schema` or `get_table_info` to understand table structures
+3. Continue from step 3 above
 
 ## Important Implementation Notes
 
@@ -591,6 +682,12 @@ See [MACOS_SETUP.md](MACOS_SETUP.md) for detailed instructions.
 
 ## Recent Changes
 
+- **Accessible schema tools** (Jan 2026) - Added `get_accessible_schema` and `get_accessible_table_info` tools:
+  - `get_accessible_schema`: Shows all tables/columns accessible for SELECT queries based on access control config
+  - `get_accessible_table_info`: Shows detailed column access status for a specific table
+  - Helps LLMs understand what they can query BEFORE attempting `execute_query`
+  - Respects whitelist/blacklist table rules and column inclusion/exclusion modes
+  - New file: `src/handlers/accessible-schema.ts`
 - **Column access policy modes** (Jan 2026) - Enhanced column-level access control with inclusion/exclusion modes:
   - New unified `columnAccess` config structure with per-table `mode` field
   - `inclusion` mode (whitelist): Only listed columns can be queried - **recommended for sensitive tables**

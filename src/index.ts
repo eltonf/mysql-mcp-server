@@ -17,6 +17,7 @@ import { validateDatabaseObject } from './handlers/validation.js';
 import { findRoutines, getRoutineDefinition, getRoutinesSchema } from './handlers/routines.js';
 import { getViewDefinition } from './handlers/views.js';
 import { executeQuery } from './handlers/data.js';
+import { getAccessibleSchema, getAccessibleTableInfo } from './handlers/accessible-schema.js';
 import {
   loadAccessControlConfig,
   initAccessControl,
@@ -293,6 +294,50 @@ const tools: Tool[] = [
       required: ['database', 'view'],
     },
   },
+  {
+    name: 'get_accessible_schema',
+    description:
+      'Shows all tables and columns accessible for SELECT queries based on query access control configuration. Use this BEFORE execute_query to understand what data you can query. Returns accessible tables with their queryable columns, respecting whitelist/blacklist and column inclusion/exclusion rules. IMPORTANT: Requires QUERY_ACCESS_CONFIG to be set.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
+        schema: {
+          type: 'string',
+          description:
+            'Filter to specific schema (optional). If not specified, returns all configured schemas.',
+        },
+      },
+      required: ['database'],
+    },
+  },
+  {
+    name: 'get_accessible_table_info',
+    description:
+      'Shows detailed column information for a specific table, with access status for each column based on query access control configuration. Use this to check if specific columns are queryable before writing SELECT queries. Shows which columns are blocked and why. IMPORTANT: Requires QUERY_ACCESS_CONFIG to be set.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        database: {
+          type: 'string',
+          description: 'Database name (e.g., "LASSO", "PRISM")',
+        },
+        table: {
+          type: 'string',
+          description: 'Table name to check',
+        },
+        schema: {
+          type: 'string',
+          description:
+            'Database schema name (optional). If not specified, will auto-detect schema.',
+        },
+      },
+      required: ['database', 'table'],
+    },
+  },
 
   // Data query tools - only available when SCHEMA_ONLY_MODE is false
   ...(!SCHEMA_ONLY_MODE ? [
@@ -476,6 +521,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_view_definition': {
         const result = await getViewDefinition(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_accessible_schema': {
+        const result = await getAccessibleSchema(args as any);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_accessible_table_info': {
+        const result = await getAccessibleTableInfo(args as any);
         return {
           content: [
             {
