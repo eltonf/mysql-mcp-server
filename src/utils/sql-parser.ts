@@ -8,14 +8,18 @@
  * - Alias resolution
  */
 
-import pkg from 'node-sql-parser';
+import pkg from "node-sql-parser";
 const { Parser } = pkg;
-import { ParsedQueryInfo, QualifiedTableRef, QualifiedColumnRef } from '../security/types.js';
-import { logger } from './logger.js';
+import {
+  ParsedQueryInfo,
+  QualifiedTableRef,
+  QualifiedColumnRef,
+} from "../security/types.js";
+import { logger } from "./logger.js";
 
 // Initialize parser with T-SQL (SQL Server) dialect
 const parser = new Parser();
-const PARSER_OPTIONS = { database: 'TransactSQL' };
+const PARSER_OPTIONS = { database: "TransactSQL" };
 
 /**
  * Parse a SQL query and extract tables, columns, and SELECT * usage
@@ -37,8 +41,8 @@ export function parseQuery(sql: string, database: string): ParsedQueryInfo {
     const statements = Array.isArray(ast) ? ast : [ast];
 
     for (const stmt of statements) {
-      if (stmt && stmt.type === 'select') {
-        processSelectStatement(stmt, database, 'dbo', result);
+      if (stmt && stmt.type === "select") {
+        processSelectStatement(stmt, database, "dbo", result);
       }
     }
   } catch (error: any) {
@@ -52,25 +56,41 @@ export function parseQuery(sql: string, database: string): ParsedQueryInfo {
 
 /**
  * Process a SELECT statement and extract table/column info
+ * @param cteNames - Set of CTE names to skip when processing FROM clause (passed down from parent)
  */
 function processSelectStatement(
   stmt: any,
   database: string,
   defaultSchema: string,
-  result: ParsedQueryInfo
+  result: ParsedQueryInfo,
+  cteNames: Set<string> = new Set(),
 ): void {
-  // Process CTEs (WITH clause)
+  // Process CTEs (WITH clause) - collect CTE names first, then process bodies
   if (stmt.with) {
+    // First pass: collect all CTE names
     for (const cte of stmt.with) {
-      if (cte.stmt) {
-        processSelectStatement(cte.stmt, database, defaultSchema, result);
+      if (cte.name?.value) {
+        cteNames.add(cte.name.value.toLowerCase());
+      }
+    }
+    // Second pass: process CTE bodies (real tables inside CTEs still need validation)
+    for (const cte of stmt.with) {
+      // Fix: CTE body is in cte.stmt.ast, not cte.stmt directly
+      if (cte.stmt?.ast) {
+        processSelectStatement(
+          cte.stmt.ast,
+          database,
+          defaultSchema,
+          result,
+          cteNames,
+        );
       }
     }
   }
 
-  // Process FROM clause (tables)
+  // Process FROM clause (tables) - pass cteNames to skip CTE references
   if (stmt.from) {
-    processFromClause(stmt.from, database, defaultSchema, result);
+    processFromClause(stmt.from, database, defaultSchema, result, cteNames);
   }
 
   // Process SELECT columns
@@ -80,42 +100,63 @@ function processSelectStatement(
 
   // Process subqueries in WHERE, HAVING, etc.
   if (stmt.where) {
-    processExpression(stmt.where, database, defaultSchema, result);
+    processExpression(stmt.where, database, defaultSchema, result, cteNames);
   }
 }
 
 /**
  * Process FROM clause to extract tables
+ * @param cteNames - Set of CTE names to skip (they're query-scoped aliases, not real tables)
  */
 function processFromClause(
   from: any[],
   database: string,
   defaultSchema: string,
-  result: ParsedQueryInfo
+  result: ParsedQueryInfo,
+  cteNames: Set<string> = new Set(),
 ): void {
   for (const item of from) {
     if (!item) continue;
 
     // Handle regular table reference
     if (item.table) {
-      const tableRef = extractTableRef(item, database, defaultSchema);
-      result.tables.push(tableRef);
+      // Check if this is a CTE reference - skip adding to tables but track alias
+      if (cteNames.has(item.table.toLowerCase())) {
+        // CTE reference - register alias pointing to __cte__ marker
+        const cteRef: QualifiedTableRef = {
+          database,
+          schema: "__cte__",
+          table: item.table,
+          alias: item.as?.toLowerCase(),
+        };
+        result.aliases.set((item.as || item.table).toLowerCase(), cteRef);
+      } else {
+        // Real table reference
+        const tableRef = extractTableRef(item, database, defaultSchema);
+        result.tables.push(tableRef);
 
-      // Track alias
-      if (item.as) {
-        result.aliases.set(item.as.toLowerCase(), tableRef);
+        // Track alias
+        if (item.as) {
+          result.aliases.set(item.as.toLowerCase(), tableRef);
+        }
       }
     }
 
     // Handle subquery in FROM
     if (item.expr && item.expr.ast) {
-      processSelectStatement(item.expr.ast, database, defaultSchema, result);
+      processSelectStatement(
+        item.expr.ast,
+        database,
+        defaultSchema,
+        result,
+        cteNames,
+      );
       // Track subquery alias
       if (item.as) {
         // Subquery alias doesn't map to a real table
         result.aliases.set(item.as.toLowerCase(), {
           database,
-          schema: '__subquery__',
+          schema: "__subquery__",
           table: item.as,
           alias: item.as,
         });
@@ -133,7 +174,11 @@ function processFromClause(
 /**
  * Extract table reference from AST node
  */
-function extractTableRef(item: any, database: string, defaultSchema: string): QualifiedTableRef {
+function extractTableRef(
+  item: any,
+  database: string,
+  defaultSchema: string,
+): QualifiedTableRef {
   // node-sql-parser may provide schema as 'db' property
   const schema = item.db || defaultSchema;
   const table = item.table;
@@ -154,12 +199,12 @@ function processColumns(
   columns: any,
   database: string,
   defaultSchema: string,
-  result: ParsedQueryInfo
+  result: ParsedQueryInfo,
 ): void {
   // Handle SELECT *
-  if (columns === '*') {
+  if (columns === "*") {
     result.hasSelectStar = true;
-    result.selectStarTables.push('*');
+    result.selectStarTables.push("*");
     return;
   }
 
@@ -184,31 +229,31 @@ function processColumnExpression(
   expr: any,
   database: string,
   defaultSchema: string,
-  result: ParsedQueryInfo
+  result: ParsedQueryInfo,
 ): void {
   if (!expr) return;
 
   // Handle star expression (SELECT * or table.*)
   // node-sql-parser returns this as type='star' OR type='column_ref' with column='*'
-  if (expr.type === 'star') {
+  if (expr.type === "star") {
     result.hasSelectStar = true;
     if (expr.table) {
       result.selectStarTables.push(expr.table);
     } else {
-      result.selectStarTables.push('*');
+      result.selectStarTables.push("*");
     }
     return;
   }
 
   // Handle column reference - check for SELECT * variant (column_ref with column='*')
-  if (expr.type === 'column_ref') {
+  if (expr.type === "column_ref") {
     // Check if this is actually SELECT * or table.*
-    if (expr.column === '*') {
+    if (expr.column === "*") {
       result.hasSelectStar = true;
       if (expr.table) {
         result.selectStarTables.push(expr.table);
       } else {
-        result.selectStarTables.push('*');
+        result.selectStarTables.push("*");
       }
       return;
     }
@@ -221,39 +266,46 @@ function processColumnExpression(
   }
 
   // Handle function calls - extract column references from arguments
-  if (expr.type === 'function' || expr.type === 'aggr_func') {
+  if (expr.type === "function" || expr.type === "aggr_func") {
     if (expr.args) {
-      if (expr.args.type === 'expr_list') {
+      if (expr.args.type === "expr_list") {
         for (const arg of expr.args.value || []) {
           processColumnExpression(arg, database, defaultSchema, result);
         }
       } else if (expr.args.expr) {
-        processColumnExpression(expr.args.expr, database, defaultSchema, result);
+        processColumnExpression(
+          expr.args.expr,
+          database,
+          defaultSchema,
+          result,
+        );
       }
     }
     return;
   }
 
   // Handle binary expressions (e.g., col1 + col2)
-  if (expr.type === 'binary_expr') {
+  if (expr.type === "binary_expr") {
     processColumnExpression(expr.left, database, defaultSchema, result);
     processColumnExpression(expr.right, database, defaultSchema, result);
     return;
   }
 
   // Handle CASE expressions
-  if (expr.type === 'case') {
+  if (expr.type === "case") {
     if (expr.args) {
       for (const arg of expr.args) {
-        if (arg.cond) processColumnExpression(arg.cond, database, defaultSchema, result);
-        if (arg.result) processColumnExpression(arg.result, database, defaultSchema, result);
+        if (arg.cond)
+          processColumnExpression(arg.cond, database, defaultSchema, result);
+        if (arg.result)
+          processColumnExpression(arg.result, database, defaultSchema, result);
       }
     }
     return;
   }
 
   // Handle subqueries in SELECT
-  if (expr.type === 'select' || expr.ast) {
+  if (expr.type === "select" || expr.ast) {
     const subStmt = expr.ast || expr;
     processSelectStatement(subStmt, database, defaultSchema, result);
   }
@@ -266,7 +318,7 @@ function extractColumnRef(
   expr: any,
   database: string,
   defaultSchema: string,
-  result: ParsedQueryInfo
+  result: ParsedQueryInfo,
 ): QualifiedColumnRef | null {
   const column = expr.column;
   const tableOrAlias = expr.table;
@@ -280,7 +332,11 @@ function extractColumnRef(
 
     if (resolved) {
       // Skip subquery columns - we can't validate them against config
-      if (resolved.schema === '__subquery__') {
+      if (resolved.schema === "__subquery__") {
+        return null;
+      }
+      // Skip CTE columns - they're query-scoped aliases, real tables in CTE body already validated
+      if (resolved.schema === "__cte__") {
         return null;
       }
       return {
@@ -293,7 +349,9 @@ function extractColumnRef(
 
     // Table name used directly (not alias)
     const tableRef = result.tables.find(
-      t => t.table.toLowerCase() === aliasLower || t.alias?.toLowerCase() === aliasLower
+      (t) =>
+        t.table.toLowerCase() === aliasLower ||
+        t.alias?.toLowerCase() === aliasLower,
     );
 
     if (tableRef) {
@@ -330,37 +388,41 @@ function extractColumnRef(
   return {
     database,
     schema: defaultSchema,
-    table: '__unknown__',
+    table: "__unknown__",
     column: column,
   };
 }
 
 /**
  * Process expressions (WHERE, HAVING, etc.) for subqueries
+ * @param cteNames - Set of CTE names to pass to nested SELECT statements
  */
 function processExpression(
   expr: any,
   database: string,
   defaultSchema: string,
-  result: ParsedQueryInfo
+  result: ParsedQueryInfo,
+  cteNames: Set<string> = new Set(),
 ): void {
   if (!expr) return;
 
   // Handle subqueries
-  if (expr.type === 'select' || expr.ast) {
+  if (expr.type === "select" || expr.ast) {
     const subStmt = expr.ast || expr;
-    processSelectStatement(subStmt, database, defaultSchema, result);
+    processSelectStatement(subStmt, database, defaultSchema, result, cteNames);
     return;
   }
 
   // Handle binary expressions
-  if (expr.left) processExpression(expr.left, database, defaultSchema, result);
-  if (expr.right) processExpression(expr.right, database, defaultSchema, result);
+  if (expr.left)
+    processExpression(expr.left, database, defaultSchema, result, cteNames);
+  if (expr.right)
+    processExpression(expr.right, database, defaultSchema, result, cteNames);
 
   // Handle IN clause with subquery
   if (expr.value && Array.isArray(expr.value)) {
     for (const v of expr.value) {
-      processExpression(v, database, defaultSchema, result);
+      processExpression(v, database, defaultSchema, result, cteNames);
     }
   }
 }
@@ -377,35 +439,55 @@ function parseQueryWithRegex(sql: string, database: string): ParsedQueryInfo {
     aliases: new Map(),
   };
 
-  const normalizedSql = sql.replace(/\s+/g, ' ').trim();
+  const normalizedSql = sql.replace(/\s+/g, " ").trim();
+
+  // Extract CTE names from WITH clause before processing FROM/JOIN
+  // Pattern matches: WITH name AS (...), name2 AS (...)
+  // Also handles RECURSIVE: WITH RECURSIVE name AS (...)
+  const cteNames = new Set<string>();
+  const ctePattern =
+    /(?:WITH\s+(?:RECURSIVE\s+)?|,\s*)(\[?[\w]+\]?)\s+AS\s*\(/gi;
+  let match;
+  while ((match = ctePattern.exec(normalizedSql)) !== null) {
+    const cteName = match[1].replace(/[\[\]]/g, "").toLowerCase();
+    cteNames.add(cteName);
+    logger.debug(`Regex parser found CTE name: ${cteName}`);
+  }
 
   // Detect SELECT *
   const selectStarPattern = /SELECT\s+(DISTINCT\s+)?(\*|[\w.]+\.\*)/gi;
-  let match;
   while ((match = selectStarPattern.exec(normalizedSql)) !== null) {
     result.hasSelectStar = true;
     const starExpr = match[2];
-    if (starExpr === '*') {
-      result.selectStarTables.push('*');
+    if (starExpr === "*") {
+      result.selectStarTables.push("*");
     } else {
       // table.* format
-      const tablePart = starExpr.replace('.*', '');
+      const tablePart = starExpr.replace(".*", "");
       result.selectStarTables.push(tablePart);
     }
   }
 
-  // Extract tables from FROM clause (basic pattern)
-  const fromPattern = /FROM\s+(\[?[\w.]+\]?(?:\s+(?:AS\s+)?[\w]+)?)/gi;
-  while ((match = fromPattern.exec(normalizedSql)) !== null) {
-    const tableExpr = match[1].trim();
-    const parts = tableExpr.split(/\s+/);
-    const tableName = parts[0].replace(/[\[\]]/g, '');
-    const alias = parts.length > 1 ? parts[parts.length - 1] : undefined;
-
+  // Helper function to add a table reference (skips CTEs)
+  const addTableRef = (tableName: string, alias: string | undefined): void => {
     // Handle schema.table format
-    const tableParts = tableName.split('.');
+    const tableParts = tableName.split(".");
     const table = tableParts.length > 1 ? tableParts[1] : tableParts[0];
-    const schema = tableParts.length > 1 ? tableParts[0] : 'dbo';
+    const schema = tableParts.length > 1 ? tableParts[0] : "dbo";
+
+    // Skip if this is a CTE name
+    if (cteNames.has(table.toLowerCase())) {
+      // Register CTE alias but don't add to tables
+      const cteRef: QualifiedTableRef = {
+        database,
+        schema: "__cte__",
+        table: table,
+        alias: alias?.toLowerCase(),
+      };
+      result.aliases.set((alias || table).toLowerCase(), cteRef);
+      logger.debug(`Regex parser skipping CTE reference: ${table}`);
+      return;
+    }
 
     const tableRef: QualifiedTableRef = {
       database,
@@ -418,6 +500,16 @@ function parseQueryWithRegex(sql: string, database: string): ParsedQueryInfo {
     if (alias) {
       result.aliases.set(alias.toLowerCase(), tableRef);
     }
+  };
+
+  // Extract tables from FROM clause (basic pattern)
+  const fromPattern = /FROM\s+(\[?[\w.]+\]?(?:\s+(?:AS\s+)?[\w]+)?)/gi;
+  while ((match = fromPattern.exec(normalizedSql)) !== null) {
+    const tableExpr = match[1].trim();
+    const parts = tableExpr.split(/\s+/);
+    const tableName = parts[0].replace(/[\[\]]/g, "");
+    const alias = parts.length > 1 ? parts[parts.length - 1] : undefined;
+    addTableRef(tableName, alias);
   }
 
   // Extract tables from JOIN clauses
@@ -425,24 +517,9 @@ function parseQueryWithRegex(sql: string, database: string): ParsedQueryInfo {
   while ((match = joinPattern.exec(normalizedSql)) !== null) {
     const tableExpr = match[1].trim();
     const parts = tableExpr.split(/\s+/);
-    const tableName = parts[0].replace(/[\[\]]/g, '');
+    const tableName = parts[0].replace(/[\[\]]/g, "");
     const alias = parts.length > 1 ? parts[parts.length - 1] : undefined;
-
-    const tableParts = tableName.split('.');
-    const table = tableParts.length > 1 ? tableParts[1] : tableParts[0];
-    const schema = tableParts.length > 1 ? tableParts[0] : 'dbo';
-
-    const tableRef: QualifiedTableRef = {
-      database,
-      schema: schema.toLowerCase(),
-      table: table,
-      alias: alias?.toLowerCase(),
-    };
-
-    result.tables.push(tableRef);
-    if (alias) {
-      result.aliases.set(alias.toLowerCase(), tableRef);
-    }
+    addTableRef(tableName, alias);
   }
 
   logger.debug(`Regex parsing result: ${JSON.stringify(result, replacer, 2)}`);
@@ -473,13 +550,13 @@ export function hasSelectStar(sql: string): boolean {
  */
 export function extractTableNames(sql: string): string[] {
   const tables: string[] = [];
-  const normalizedSql = sql.replace(/\s+/g, ' ').trim();
+  const normalizedSql = sql.replace(/\s+/g, " ").trim();
 
   // FROM clause
   const fromMatch = normalizedSql.match(/FROM\s+(\[?[\w.]+\]?)/i);
   if (fromMatch) {
-    const tableName = fromMatch[1].replace(/[\[\]]/g, '');
-    const parts = tableName.split('.');
+    const tableName = fromMatch[1].replace(/[\[\]]/g, "");
+    const parts = tableName.split(".");
     tables.push(parts[parts.length - 1]);
   }
 
@@ -487,8 +564,8 @@ export function extractTableNames(sql: string): string[] {
   const joinPattern = /JOIN\s+(\[?[\w.]+\]?)/gi;
   let match;
   while ((match = joinPattern.exec(normalizedSql)) !== null) {
-    const tableName = match[1].replace(/[\[\]]/g, '');
-    const parts = tableName.split('.');
+    const tableName = match[1].replace(/[\[\]]/g, "");
+    const parts = tableName.split(".");
     tables.push(parts[parts.length - 1]);
   }
 
