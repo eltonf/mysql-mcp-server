@@ -14,10 +14,10 @@ import {
   AccessControlError,
   QualifiedTableRef,
   QualifiedColumnRef,
-} from './types.js';
-import { getTableConfigForSchema } from './config-loader.js';
-import { parseQuery } from '../utils/sql-parser.js';
-import { logger } from '../utils/logger.js';
+} from "./types.js";
+import { getTableConfigForSchema } from "./config-loader.js";
+import { parseQuery } from "../utils/sql-parser.js";
+import { logger } from "../utils/logger.js";
 
 /**
  * Validate a query against access control configuration
@@ -26,7 +26,7 @@ import { logger } from '../utils/logger.js';
 export function validateQueryAccess(
   query: string,
   database: string,
-  config: AccessControlConfig
+  config: AccessControlConfig,
 ): void {
   const violations: AccessViolation[] = [];
 
@@ -38,7 +38,9 @@ export function validateQueryAccess(
 
   // Step 2: Parse the query
   const parsed = parseQuery(query, database);
-  logger.debug(`Parsed query info: tables=${parsed.tables.length}, columns=${parsed.columns.length}, hasSelectStar=${parsed.hasSelectStar}`);
+  logger.debug(
+    `Parsed query info: tables=${parsed.tables.length}, columns=${parsed.columns.length}, hasSelectStar=${parsed.hasSelectStar}`,
+  );
 
   // Step 3: Validate SELECT * usage
   if (config.requireExplicitColumns && parsed.hasSelectStar) {
@@ -67,11 +69,13 @@ export function validateQueryAccess(
 
   // Throw if any violations found
   if (violations.length > 0) {
-    logger.warn(`Access control violations: ${violations.map(v => v.message).join('; ')}`);
+    logger.warn(
+      `Access control violations: ${violations.map((v) => v.message).join("; ")}`,
+    );
     throw new AccessControlError(violations);
   }
 
-  logger.debug('Query passed access control validation');
+  logger.debug("Query passed access control validation");
 }
 
 /**
@@ -79,12 +83,12 @@ export function validateQueryAccess(
  */
 function validateDatabaseAccess(
   database: string,
-  config: AccessControlConfig
+  config: AccessControlConfig,
 ): AccessViolation | null {
   const dbUpper = database.toUpperCase();
   if (!config.databases[dbUpper]) {
     return {
-      type: 'database_not_configured',
+      type: "database_not_configured",
       database,
       message:
         `Database '${database}' is not configured for query access. ` +
@@ -101,16 +105,16 @@ function validateSelectStar(selectStarTables: string[]): AccessViolation[] {
   const violations: AccessViolation[] = [];
 
   for (const tableRef of selectStarTables) {
-    if (tableRef === '*') {
+    if (tableRef === "*") {
       violations.push({
-        type: 'select_star',
+        type: "select_star",
         message:
-          'SELECT * is not allowed. All SELECT statements must explicitly list columns. ' +
-          'Example: SELECT Name, TeamID FROM Player',
+          "SELECT * is not allowed. All SELECT statements must explicitly list columns. " +
+          "Example: SELECT Name, TeamID FROM Player",
       });
     } else {
       violations.push({
-        type: 'select_star',
+        type: "select_star",
         table: tableRef,
         message:
           `SELECT ${tableRef}.* is not allowed. ` +
@@ -127,18 +131,27 @@ function validateSelectStar(selectStarTables: string[]): AccessViolation[] {
  */
 function validateTableAccess(
   table: QualifiedTableRef,
-  config: AccessControlConfig
+  config: AccessControlConfig,
 ): AccessViolation | null {
   // Skip subquery pseudo-tables
-  if (table.schema === '__subquery__') {
+  if (table.schema === "__subquery__") {
     return null;
   }
 
-  const schemaConfig = getTableConfigForSchema(config, table.database, table.schema);
+  // Skip CTE references (they're query-scoped aliases, not real tables)
+  if (table.schema === "__cte__") {
+    return null;
+  }
+
+  const schemaConfig = getTableConfigForSchema(
+    config,
+    table.database,
+    table.schema,
+  );
 
   if (!schemaConfig) {
     return {
-      type: 'schema_not_configured',
+      type: "schema_not_configured",
       database: table.database,
       schema: table.schema,
       table: table.table,
@@ -152,27 +165,27 @@ function validateTableAccess(
   const tableNameLower = table.table.toLowerCase();
 
   // Check whitelist/blacklist
-  const listLower = tableConfig.list.map(t => t.toLowerCase());
+  const listLower = tableConfig.list.map((t) => t.toLowerCase());
 
   switch (tableConfig.mode) {
-    case 'whitelist':
+    case "whitelist":
       if (!listLower.includes(tableNameLower)) {
         return {
-          type: 'table_not_allowed',
+          type: "table_not_allowed",
           database: table.database,
           schema: table.schema,
           table: table.table,
           message:
             `Table '${table.database}.${table.schema}.${table.table}' is not in the allowed tables list. ` +
-            `Allowed tables for ${table.database}.${table.schema}: ${tableConfig.list.join(', ') || '(none)'}`,
+            `Allowed tables for ${table.database}.${table.schema}: ${tableConfig.list.join(", ") || "(none)"}`,
         };
       }
       break;
 
-    case 'blacklist':
+    case "blacklist":
       if (listLower.includes(tableNameLower)) {
         return {
-          type: 'table_not_allowed',
+          type: "table_not_allowed",
           database: table.database,
           schema: table.schema,
           table: table.table,
@@ -183,7 +196,7 @@ function validateTableAccess(
       }
       break;
 
-    case 'none':
+    case "none":
       // No table-level restrictions
       break;
   }
@@ -196,14 +209,18 @@ function validateTableAccess(
  */
 function validateColumnAccess(
   column: QualifiedColumnRef,
-  config: AccessControlConfig
+  config: AccessControlConfig,
 ): AccessViolation | null {
   // Skip unknown table columns (can't validate)
-  if (column.table === '__unknown__') {
+  if (column.table === "__unknown__") {
     return null;
   }
 
-  const schemaConfig = getTableConfigForSchema(config, column.database, column.schema);
+  const schemaConfig = getTableConfigForSchema(
+    config,
+    column.database,
+    column.schema,
+  );
   if (!schemaConfig) {
     // Schema not configured - already caught in table validation
     return null;
@@ -215,7 +232,7 @@ function validateColumnAccess(
 
   // Find policy for this table (case-insensitive)
   let policy = null;
-  let policyTableName = '';
+  let policyTableName = "";
   for (const [table, tablePolicy] of Object.entries(columnAccess)) {
     if (table.toLowerCase() === tableNameLower) {
       policy = tablePolicy;
@@ -229,34 +246,34 @@ function validateColumnAccess(
     return null;
   }
 
-  const columnsLower = policy.columns.map(c => c.toLowerCase());
+  const columnsLower = policy.columns.map((c) => c.toLowerCase());
 
-  if (policy.mode === 'inclusion') {
+  if (policy.mode === "inclusion") {
     // Whitelist: column must be in the list
     if (!columnsLower.includes(columnNameLower)) {
       return {
-        type: 'column_not_allowed',
+        type: "column_not_allowed",
         database: column.database,
         schema: column.schema,
         table: column.table,
         column: column.column,
         message:
           `Column '${column.column}' from '${column.database}.${column.schema}.${column.table}' cannot be selected. ` +
-          `Allowed columns for ${policyTableName}: ${policy.columns.join(', ')}`,
+          `Allowed columns for ${policyTableName}: ${policy.columns.join(", ")}`,
       };
     }
   } else {
     // Blacklist: column must NOT be in the list
     if (columnsLower.includes(columnNameLower)) {
       return {
-        type: 'column_excluded',
+        type: "column_excluded",
         database: column.database,
         schema: column.schema,
         table: column.table,
         column: column.column,
         message:
           `Column '${column.column}' from '${column.database}.${column.schema}.${column.table}' cannot be selected. ` +
-          `Excluded columns: ${policy.columns.join(', ')}`,
+          `Excluded columns: ${policy.columns.join(", ")}`,
       };
     }
   }
@@ -273,7 +290,7 @@ let globalConfig: AccessControlConfig | null = null;
  */
 export function initAccessControl(config: AccessControlConfig): void {
   globalConfig = config;
-  logger.info('Access control initialized');
+  logger.info("Access control initialized");
 }
 
 /**
@@ -283,7 +300,7 @@ export function initAccessControl(config: AccessControlConfig): void {
 export function getAccessControlConfig(): AccessControlConfig {
   if (!globalConfig) {
     throw new Error(
-      'Access control not initialized. Ensure QUERY_ACCESS_CONFIG is set and valid.'
+      "Access control not initialized. Ensure QUERY_ACCESS_CONFIG is set and valid.",
     );
   }
   return globalConfig;
@@ -297,5 +314,8 @@ export function isAccessControlInitialized(): boolean {
 }
 
 // Re-export types for convenience
-export { AccessControlConfig, AccessControlError } from './types.js';
-export { loadAccessControlConfig, getTableConfigForSchema } from './config-loader.js';
+export { AccessControlConfig, AccessControlError } from "./types.js";
+export {
+  loadAccessControlConfig,
+  getTableConfigForSchema,
+} from "./config-loader.js";
