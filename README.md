@@ -18,6 +18,20 @@ An open-source Model Context Protocol (MCP) server for MySQL schema introspectio
 
 ## Setup
 
+Fast path for users installing from npm:
+
+```bash
+npx -y mysql-mcp-server init
+```
+
+Then edit `.env` and check the connection:
+
+```bash
+npx -y mysql-mcp-server doctor
+```
+
+Local development from this repository:
+
 ```bash
 npm install
 cp .env.example .env
@@ -28,15 +42,13 @@ npm start
 Configure `.env`:
 
 ```dotenv
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=app_db
-DB_USER=mcp_reader
-DB_PASSWORD=change_me
-DB_SSL=false
+DATABASE_URL=mysql://mcp_reader:change_me@localhost:3306/app_db
+SCHEMA_ONLY_MODE=true
 ```
 
-This server connects to one configured database per process. Tool inputs may include `database` for compatibility, but it must match `DB_NAME`.
+You can also use individual `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, and `DB_SSL` variables. Individual variables override `DATABASE_URL`.
+
+This server connects to one configured database per process. Tool inputs may include `database` for compatibility, but it must match the configured database.
 
 ## Least-Privilege MySQL User
 
@@ -52,18 +64,23 @@ Use a stronger host restriction and password in production.
 
 ## MCP Client Example
 
+Client-specific docs:
+
+- [Claude Code](docs/clients/claude-code.md)
+- [Claude Desktop](docs/clients/claude-desktop.md)
+- [Codex](docs/clients/codex.md)
+- [OpenCode](docs/clients/opencode.md)
+- [Cursor](docs/clients/cursor.md)
+- [VS Code](docs/clients/vscode.md)
+
 ```json
 {
   "mcpServers": {
-    "mysql-mcp-server": {
-      "command": "node",
-      "args": ["/absolute/path/to/mysql-mcp-server/dist/index.js"],
+    "mysql": {
+      "command": "npx",
+      "args": ["-y", "mysql-mcp-server"],
       "env": {
-        "DB_HOST": "localhost",
-        "DB_PORT": "3306",
-        "DB_NAME": "app_db",
-        "DB_USER": "mcp_reader",
-        "DB_PASSWORD": "change_me",
+        "DATABASE_URL": "mysql://mcp_reader:change_me@localhost:3306/app_db",
         "SCHEMA_ONLY_MODE": "true"
       }
     }

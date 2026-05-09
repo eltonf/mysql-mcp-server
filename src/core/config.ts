@@ -1,4 +1,5 @@
 import { config as dotenvConfig } from 'dotenv';
+import { parseDatabaseUrl } from './database-url.js';
 
 dotenvConfig();
 
@@ -22,16 +23,16 @@ export interface AppConfig {
   };
 }
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
+function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
+  const value = env[name];
   if (!value) {
     throw new Error(`${name} is required`);
   }
   return value;
 }
 
-function intEnv(name: string, defaultValue: number): number {
-  const value = process.env[name];
+function intEnv(env: NodeJS.ProcessEnv, name: string, defaultValue: number): number {
+  const value = env[name];
   if (!value) {
     return defaultValue;
   }
@@ -42,25 +43,31 @@ function intEnv(name: string, defaultValue: number): number {
   return parsed;
 }
 
-export const appConfig: AppConfig = {
-  db: {
-    host: process.env.DB_HOST || 'localhost',
-    port: intEnv('DB_PORT', 3306),
-    name: requiredEnv('DB_NAME'),
-    user: requiredEnv('DB_USER'),
-    password: requiredEnv('DB_PASSWORD'),
-    ssl: process.env.DB_SSL === 'true',
-  },
-  server: {
-    name: process.env.MCP_SERVER_NAME || 'mysql-mcp-server',
-    version: process.env.MCP_SERVER_VERSION || '1.0.0',
-    schemaOnlyMode: process.env.SCHEMA_ONLY_MODE === 'true',
-  },
-  query: {
-    maxRows: intEnv('MAX_QUERY_ROWS', 100),
-    timeoutMs: intEnv('QUERY_TIMEOUT_MS', 30000),
-  },
-};
+export function buildAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const urlConfig = env.DATABASE_URL ? parseDatabaseUrl(env.DATABASE_URL) : null;
+
+  return {
+    db: {
+      host: env.DB_HOST || urlConfig?.host || 'localhost',
+      port: intEnv(env, 'DB_PORT', urlConfig?.port || 3306),
+      name: env.DB_NAME || urlConfig?.name || requiredEnv(env, 'DB_NAME'),
+      user: env.DB_USER || urlConfig?.user || requiredEnv(env, 'DB_USER'),
+      password: env.DB_PASSWORD || urlConfig?.password || requiredEnv(env, 'DB_PASSWORD'),
+      ssl: env.DB_SSL ? env.DB_SSL === 'true' : Boolean(urlConfig?.ssl),
+    },
+    server: {
+      name: env.MCP_SERVER_NAME || 'mysql-mcp-server',
+      version: env.MCP_SERVER_VERSION || '1.0.0',
+      schemaOnlyMode: env.SCHEMA_ONLY_MODE !== 'false',
+    },
+    query: {
+      maxRows: intEnv(env, 'MAX_QUERY_ROWS', 100),
+      timeoutMs: intEnv(env, 'QUERY_TIMEOUT_MS', 30000),
+    },
+  };
+}
+
+export const appConfig: AppConfig = buildAppConfig();
 
 export function resolveDatabase(input?: string): string {
   if (input && /^\s*(SELECT|WITH)\b/i.test(input)) {
