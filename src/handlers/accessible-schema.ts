@@ -1,25 +1,17 @@
-/**
- * Accessible Schema Handlers
- *
- * Provides tools to introspect which tables and columns are accessible
- * based on the query access control configuration. These tools help LLMs
- * understand what they can query BEFORE attempting execute_query.
- */
-
-import { db } from '../db/connection.js';
-import { logger } from '../utils/logger.js';
+import { resolveDatabase, resolveSchema } from '../core/config.js';
+import { logger } from '../core/logger.js';
 import {
-  isAccessControlInitialized,
   getAccessControlConfig,
   getTableConfigForSchema,
-} from '../security/access-control.js';
-import { AccessControlConfig, ColumnAccessPolicy, TableConfig } from '../security/types.js';
+  isAccessControlInitialized,
+} from '../core/security/access-control.js';
+import {
+  AccessControlConfig,
+  ColumnAccessPolicy,
+  TableConfig,
+} from '../core/security/types.js';
 import { getTableInfo } from './schema.js';
 import { findTables } from './search.js';
-
-// ============================================================================
-// Type Definitions
-// ============================================================================
 
 export interface AccessibleColumn {
   name: string;
@@ -28,17 +20,17 @@ export interface AccessibleColumn {
   isIdentity: boolean;
   isPrimaryKey: boolean;
   isForeignKey: boolean;
-  description?: string;
+  description?: string | null;
 }
 
 export interface AccessibleTable {
   schema: string;
   name: string;
   type: 'TABLE' | 'VIEW';
-  columnAccessMode?: 'inclusion' | 'exclusion'; // undefined = all columns allowed
+  columnAccessMode?: 'inclusion' | 'exclusion';
   accessibleColumns: AccessibleColumn[];
-  blockedColumns?: string[]; // For exclusion mode (informational)
-  allowedColumnsList?: string[]; // For inclusion mode (shows config)
+  blockedColumns?: string[];
+  allowedColumnsList?: string[];
 }
 
 export interface AccessibleSchemaResult {
@@ -49,32 +41,9 @@ export interface AccessibleSchemaResult {
   notes?: string[];
 }
 
-export interface AccessibleColumnInfo {
-  name: string;
-  dataType: string;
-  nullable: boolean;
-  isIdentity: boolean;
-  isPrimaryKey: boolean;
-  isForeignKey: boolean;
-  description?: string;
+export interface AccessibleColumnInfo extends AccessibleColumn {
   isAccessible: boolean;
   accessDeniedReason?: string;
-}
-
-export interface AccessibleTableIndex {
-  name: string;
-  type: string;
-  isUnique: boolean;
-  isPrimaryKey: boolean;
-  columns: string;
-}
-
-export interface AccessibleTableForeignKey {
-  constraintName: string;
-  fromColumns: string;
-  toSchema: string;
-  toTable: string;
-  toColumns: string;
 }
 
 export interface AccessibleTableInfo {
@@ -86,519 +55,260 @@ export interface AccessibleTableInfo {
   accessDeniedReason?: string;
   columnAccessMode?: 'inclusion' | 'exclusion';
   columns?: AccessibleColumnInfo[];
-  indexes?: AccessibleTableIndex[];
-  foreignKeys?: AccessibleTableForeignKey[];
+  indexes?: unknown[];
+  foreignKeys?: unknown[];
   accessibleColumnCount?: number;
   totalColumnCount?: number;
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
+function requireAccessConfig(database: string): AccessControlConfig {
+  if (!isAccessControlInitialized()) {
+    throw new Error(
+      'Access control not configured. Set QUERY_ACCESS_CONFIG to enable accessible schema introspection.',
+    );
+  }
 
-/**
- * Get all schemas that have configuration for a database
- */
+  const config = getAccessControlConfig();
+  if (!config.databases[database.toUpperCase()]) {
+    throw new Error(
+      `Database '${database}' is not configured in query access control. ` +
+        `Configured databases: ${Object.keys(config.databases).join(', ') || '(none)'}`,
+    );
+  }
+
+  return config;
+}
+
 function getConfiguredSchemas(config: AccessControlConfig, database: string): string[] {
   const dbConfig = config.databases[database.toUpperCase()];
   if (!dbConfig) {
     return [];
   }
-
-  if (dbConfig.schemas) {
-    return Object.keys(dbConfig.schemas);
-  }
-
-  // Compact format - no specific schemas, use wildcard
-  return ['*'];
+  return dbConfig.schemas ? Object.keys(dbConfig.schemas) : [database];
 }
 
-/**
- * Get all user schemas from the database
- */
-async function getAllSchemasFromDatabase(database: string): Promise<string[]> {
-  const query = `
-USE [${database}];
-SELECT name
-FROM sys.schemas
-WHERE schema_id BETWEEN 5 AND 16383
-  AND name NOT IN ('sys', 'INFORMATION_SCHEMA', 'guest')
-ORDER BY name;
-`;
-  try {
-    const result = await db.query(query);
-    return result.recordset.map((row: any) => row.name);
-  } catch (error) {
-    logger.error(`Error getting schemas from ${database}:`, error);
-    return ['dbo']; // Fallback to dbo
-  }
-}
-
-/**
- * Check if a table is accessible based on table config
- */
 function isTableAccessible(
   tableName: string,
-  tableConfig: TableConfig
+  tableConfig: TableConfig,
 ): { accessible: boolean; reason?: string } {
+  const listLower = tableConfig.list.map((table) => table.toLowerCase());
   const tableNameLower = tableName.toLowerCase();
-  const listLower = tableConfig.list.map((t) => t.toLowerCase());
 
-  switch (tableConfig.mode) {
-    case 'whitelist':
-      if (!listLower.includes(tableNameLower)) {
-        return {
-          accessible: false,
-          reason: `Table not in whitelist. Allowed tables: ${tableConfig.list.join(', ') || '(none)'}`,
-        };
-      }
-      return { accessible: true };
-
-    case 'blacklist':
-      if (listLower.includes(tableNameLower)) {
-        return {
-          accessible: false,
-          reason: 'Table is in blacklist',
-        };
-      }
-      return { accessible: true };
-
-    case 'none':
-      return { accessible: true };
-
-    default:
-      return { accessible: false, reason: 'Unknown table access mode' };
+  if (tableConfig.mode === 'whitelist' && !listLower.includes(tableNameLower)) {
+    return {
+      accessible: false,
+      reason: `Table not in whitelist. Allowed tables: ${tableConfig.list.join(', ') || '(none)'}`,
+    };
   }
+
+  if (tableConfig.mode === 'blacklist' && listLower.includes(tableNameLower)) {
+    return { accessible: false, reason: 'Table is in blacklist' };
+  }
+
+  return { accessible: true };
 }
 
-/**
- * Filter columns based on column access policy
- */
-function filterColumns(
-  columns: any[],
+function findColumnPolicy(
   tableName: string,
-  columnAccess: Record<string, ColumnAccessPolicy>
+  columnAccess: Record<string, ColumnAccessPolicy>,
+): ColumnAccessPolicy | null {
+  for (const [table, policy] of Object.entries(columnAccess)) {
+    if (table.toLowerCase() === tableName.toLowerCase()) {
+      return policy;
+    }
+  }
+  return null;
+}
+
+function filterColumns(
+  columns: AccessibleColumn[],
+  tableName: string,
+  columnAccess: Record<string, ColumnAccessPolicy>,
 ): {
   accessibleColumns: AccessibleColumn[];
   blockedColumns?: string[];
   allowedColumnsList?: string[];
   mode?: 'inclusion' | 'exclusion';
 } {
-  // Find policy for this table (case-insensitive)
-  let policy: ColumnAccessPolicy | null = null;
-  for (const [table, tablePolicy] of Object.entries(columnAccess)) {
-    if (table.toLowerCase() === tableName.toLowerCase()) {
-      policy = tablePolicy;
-      break;
-    }
-  }
-
-  // No policy = all columns accessible
+  const policy = findColumnPolicy(tableName, columnAccess);
   if (!policy) {
-    return {
-      accessibleColumns: columns.map((col) => ({
-        name: col.name,
-        dataType: col.dataType,
-        nullable: col.nullable,
-        isIdentity: col.isIdentity,
-        isPrimaryKey: col.isPrimaryKey,
-        isForeignKey: col.isForeignKey,
-        description: col.description,
-      })),
-    };
+    return { accessibleColumns: columns };
   }
 
-  const columnsLower = policy.columns.map((c) => c.toLowerCase());
-
+  const policyColumns = policy.columns.map((column) => column.toLowerCase());
   if (policy.mode === 'inclusion') {
-    // Whitelist: only columns in the list are accessible
-    const accessibleColumns = columns
-      .filter((col) => columnsLower.includes(col.name.toLowerCase()))
-      .map((col) => ({
-        name: col.name,
-        dataType: col.dataType,
-        nullable: col.nullable,
-        isIdentity: col.isIdentity,
-        isPrimaryKey: col.isPrimaryKey,
-        isForeignKey: col.isForeignKey,
-        description: col.description,
-      }));
-
     return {
-      accessibleColumns,
+      accessibleColumns: columns.filter((column) => policyColumns.includes(column.name.toLowerCase())),
       allowedColumnsList: policy.columns,
       mode: 'inclusion',
     };
-  } else {
-    // Exclusion: columns in the list are blocked
-    const accessibleColumns = columns
-      .filter((col) => !columnsLower.includes(col.name.toLowerCase()))
-      .map((col) => ({
-        name: col.name,
-        dataType: col.dataType,
-        nullable: col.nullable,
-        isIdentity: col.isIdentity,
-        isPrimaryKey: col.isPrimaryKey,
-        isForeignKey: col.isForeignKey,
-        description: col.description,
-      }));
-
-    return {
-      accessibleColumns,
-      blockedColumns: policy.columns,
-      mode: 'exclusion',
-    };
   }
+
+  return {
+    accessibleColumns: columns.filter((column) => !policyColumns.includes(column.name.toLowerCase())),
+    blockedColumns: policy.columns,
+    mode: 'exclusion',
+  };
 }
 
-/**
- * Annotate columns with access status
- */
 function annotateColumnsWithAccess(
-  columns: any[],
+  columns: AccessibleColumn[],
   tableName: string,
-  columnAccess: Record<string, ColumnAccessPolicy>
+  columnAccess: Record<string, ColumnAccessPolicy>,
 ): {
   annotatedColumns: AccessibleColumnInfo[];
   mode?: 'inclusion' | 'exclusion';
 } {
-  // Find policy for this table (case-insensitive)
-  let policy: ColumnAccessPolicy | null = null;
-  for (const [table, tablePolicy] of Object.entries(columnAccess)) {
-    if (table.toLowerCase() === tableName.toLowerCase()) {
-      policy = tablePolicy;
-      break;
-    }
-  }
-
-  // No policy = all columns accessible
+  const policy = findColumnPolicy(tableName, columnAccess);
   if (!policy) {
     return {
-      annotatedColumns: columns.map((col) => ({
-        name: col.name,
-        dataType: col.dataType,
-        nullable: col.nullable,
-        isIdentity: col.isIdentity,
-        isPrimaryKey: col.isPrimaryKey,
-        isForeignKey: col.isForeignKey,
-        description: col.description,
-        isAccessible: true,
-      })),
+      annotatedColumns: columns.map((column) => ({ ...column, isAccessible: true })),
     };
   }
 
-  const columnsLower = policy.columns.map((c) => c.toLowerCase());
-
-  if (policy.mode === 'inclusion') {
-    // Whitelist: only columns in the list are accessible
-    return {
-      annotatedColumns: columns.map((col) => {
-        const isAccessible = columnsLower.includes(col.name.toLowerCase());
-        return {
-          name: col.name,
-          dataType: col.dataType,
-          nullable: col.nullable,
-          isIdentity: col.isIdentity,
-          isPrimaryKey: col.isPrimaryKey,
-          isForeignKey: col.isForeignKey,
-          description: col.description,
-          isAccessible,
-          accessDeniedReason: isAccessible
-            ? undefined
-            : `Column not in inclusion list. Allowed: ${policy!.columns.join(', ')}`,
-        };
-      }),
-      mode: 'inclusion',
-    };
-  } else {
-    // Exclusion: columns in the list are blocked
-    return {
-      annotatedColumns: columns.map((col) => {
-        const isBlocked = columnsLower.includes(col.name.toLowerCase());
-        return {
-          name: col.name,
-          dataType: col.dataType,
-          nullable: col.nullable,
-          isIdentity: col.isIdentity,
-          isPrimaryKey: col.isPrimaryKey,
-          isForeignKey: col.isForeignKey,
-          description: col.description,
-          isAccessible: !isBlocked,
-          accessDeniedReason: isBlocked
-            ? `Column in exclusion list: ${policy!.columns.join(', ')}`
-            : undefined,
-        };
-      }),
-      mode: 'exclusion',
-    };
-  }
+  const policyColumns = policy.columns.map((column) => column.toLowerCase());
+  return {
+    annotatedColumns: columns.map((column) => {
+      const listed = policyColumns.includes(column.name.toLowerCase());
+      const isAccessible = policy.mode === 'inclusion' ? listed : !listed;
+      return {
+        ...column,
+        isAccessible,
+        accessDeniedReason: isAccessible
+          ? undefined
+          : policy.mode === 'inclusion'
+            ? `Column not in inclusion list. Allowed: ${policy.columns.join(', ')}`
+            : `Column in exclusion list: ${policy.columns.join(', ')}`,
+      };
+    }),
+    mode: policy.mode,
+  };
 }
 
-// ============================================================================
-// Main Handlers
-// ============================================================================
-
-/**
- * Get all accessible tables and columns for a database
- */
 export async function getAccessibleSchema(args: {
-  database: string;
+  database?: string;
   schema?: string;
 }): Promise<AccessibleSchemaResult> {
-  const { database, schema: filterSchema } = args;
-
-  // Check if access control is initialized
-  if (!isAccessControlInitialized()) {
-    throw new Error(
-      'Access control not configured. Set QUERY_ACCESS_CONFIG environment variable to enable accessible schema introspection.'
-    );
-  }
-
-  const config = getAccessControlConfig();
-
-  // Validate database is in config
-  const dbUpper = database.toUpperCase();
-  if (!config.databases[dbUpper]) {
-    const configuredDbs = Object.keys(config.databases);
-    throw new Error(
-      `Database '${database}' is not configured in query access control. ` +
-        `Configured databases: ${configuredDbs.join(', ') || '(none)'}`
-    );
-  }
-
+  const database = resolveDatabase(args.database);
+  const schema = resolveSchema(args.schema);
+  const config = requireAccessConfig(database);
   const notes: string[] = [];
-  const allTables: AccessibleTable[] = [];
 
-  // Determine which schemas to process
-  let schemasToProcess: string[];
-  const configuredSchemas = getConfiguredSchemas(config, database);
-
-  if (filterSchema) {
-    // User specified a schema - use just that one
-    schemasToProcess = [filterSchema];
-  } else if (configuredSchemas.includes('*')) {
-    // Wildcard schema - get all schemas from database
-    schemasToProcess = await getAllSchemasFromDatabase(database);
-    notes.push(`Wildcard schema (*) in config - checking all ${schemasToProcess.length} schemas`);
-  } else {
-    // Use explicitly configured schemas
-    schemasToProcess = configuredSchemas;
+  const schemaConfig = getTableConfigForSchema(config, database, schema);
+  if (!schemaConfig) {
+    throw new Error(`Schema '${schema}' is not configured for query access in database '${database}'.`);
   }
 
-  // Process each schema
-  for (const schemaName of schemasToProcess) {
-    const schemaConfig = getTableConfigForSchema(config, database, schemaName);
+  const { tableConfig, columnAccess } = schemaConfig;
+  const tableNames = tableConfig.mode === 'whitelist'
+    ? tableConfig.list
+    : (await findTables({ database })).map((table) => table.tableName);
+  const blacklist = tableConfig.mode === 'blacklist'
+    ? new Set(tableConfig.list.map((table) => table.toLowerCase()))
+    : new Set<string>();
+  const accessibleTableNames = tableNames.filter((table) => !blacklist.has(table.toLowerCase()));
 
-    if (!schemaConfig) {
-      // Schema not configured - skip with note
-      if (filterSchema) {
-        throw new Error(
-          `Schema '${schemaName}' is not configured for query access in database '${database}'. ` +
-            `Configured schemas: ${configuredSchemas.join(', ')}`
-        );
-      }
-      continue;
-    }
+  if (tableConfig.mode === 'blacklist' && tableConfig.list.length > 0) {
+    notes.push(`${tableConfig.list.length} table(s) blocked by blacklist: ${tableConfig.list.join(', ')}`);
+  }
 
-    const { tableConfig, columnAccess } = schemaConfig;
+  const tables: AccessibleTable[] = [];
+  for (const tableName of accessibleTableNames) {
+    try {
+      const tableInfo = await getTableInfo({ database, table: tableName });
+      const { accessibleColumns, blockedColumns, allowedColumnsList, mode } = filterColumns(
+        tableInfo.columns,
+        tableInfo.name,
+        columnAccess,
+      );
 
-    // Get list of accessible tables for this schema
-    let accessibleTableNames: string[];
-
-    if (tableConfig.mode === 'whitelist') {
-      // Whitelist: use the configured list directly
-      accessibleTableNames = tableConfig.list;
-    } else {
-      // Blacklist or none: get all tables from DB, then filter
-      const dbTables = await findTables({ database, schema: schemaName });
-      const allTableNames = dbTables.map((t) => t.tableName);
-
-      if (tableConfig.mode === 'blacklist') {
-        const blacklistLower = tableConfig.list.map((t) => t.toLowerCase());
-        accessibleTableNames = allTableNames.filter(
-          (t) => !blacklistLower.includes(t.toLowerCase())
-        );
-        if (tableConfig.list.length > 0) {
-          notes.push(
-            `Schema '${schemaName}' uses blacklist mode - ${tableConfig.list.length} tables blocked: ${tableConfig.list.join(', ')}`
-          );
-        }
-      } else {
-        // mode === 'none'
-        accessibleTableNames = allTableNames;
-      }
-    }
-
-    // Get column info for each accessible table
-    for (const tableName of accessibleTableNames) {
-      try {
-        const tableInfo = await getTableInfo({ database, table: tableName, schema: schemaName });
-
-        const { accessibleColumns, blockedColumns, allowedColumnsList, mode } = filterColumns(
-          tableInfo.columns,
-          tableName,
-          columnAccess
-        );
-
-        const accessibleTable: AccessibleTable = {
-          schema: schemaName,
-          name: tableName,
-          type: tableInfo.type,
-          accessibleColumns,
-        };
-
-        if (mode) {
-          accessibleTable.columnAccessMode = mode;
-        }
-        if (blockedColumns && blockedColumns.length > 0) {
-          accessibleTable.blockedColumns = blockedColumns;
-        }
-        if (allowedColumnsList && allowedColumnsList.length > 0) {
-          accessibleTable.allowedColumnsList = allowedColumnsList;
-        }
-
-        allTables.push(accessibleTable);
-      } catch (error: any) {
-        // Table might not exist in DB (whitelist has stale entry)
-        logger.warn(`Could not get info for table ${schemaName}.${tableName}: ${error.message}`);
-      }
+      tables.push({
+        schema,
+        name: tableInfo.name,
+        type: tableInfo.type,
+        accessibleColumns,
+        columnAccessMode: mode,
+        blockedColumns,
+        allowedColumnsList,
+      });
+    } catch (error) {
+      logger.warn(`Could not get info for table ${tableName}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   return {
     database,
     requireExplicitColumns: config.requireExplicitColumns,
-    configuredSchemas,
-    tables: allTables,
-    notes: notes.length > 0 ? notes : undefined,
+    configuredSchemas: getConfiguredSchemas(config, database),
+    tables,
+    notes: notes.length ? notes : undefined,
   };
 }
 
-/**
- * Get accessible schema for a specific table
- */
 export async function getAccessibleTableInfo(args: {
-  database: string;
+  database?: string;
   table: string;
   schema?: string;
 }): Promise<AccessibleTableInfo> {
-  const { database, table, schema } = args;
+  const database = resolveDatabase(args.database);
+  const schema = resolveSchema(args.schema);
+  const config = requireAccessConfig(database);
 
-  // Check if access control is initialized
-  if (!isAccessControlInitialized()) {
-    throw new Error(
-      'Access control not configured. Set QUERY_ACCESS_CONFIG environment variable to enable accessible schema introspection.'
-    );
-  }
-
-  const config = getAccessControlConfig();
-
-  // Validate database is in config
-  const dbUpper = database.toUpperCase();
-  if (!config.databases[dbUpper]) {
-    const configuredDbs = Object.keys(config.databases);
-    throw new Error(
-      `Database '${database}' is not configured in query access control. ` +
-        `Configured databases: ${configuredDbs.join(', ') || '(none)'}`
-    );
-  }
-
-  // Get full table info first (this will auto-detect schema if needed)
-  let tableInfo: any;
-  let actualSchema: string;
-
+  let tableInfo;
   try {
-    tableInfo = await getTableInfo({ database, table, schema });
-    actualSchema = tableInfo.schema || schema || 'dbo';
-  } catch (error: any) {
-    // Table not found or ambiguous
+    tableInfo = await getTableInfo({ database, table: args.table });
+  } catch (error) {
     return {
       database,
-      schema: schema || 'unknown',
-      table,
+      schema,
+      table: args.table,
       type: 'TABLE',
       isAccessible: false,
-      accessDeniedReason: error.message,
+      accessDeniedReason: error instanceof Error ? error.message : String(error),
     };
   }
 
-  // Get schema config
-  const schemaConfig = getTableConfigForSchema(config, database, actualSchema);
-
+  const schemaConfig = getTableConfigForSchema(config, database, schema);
   if (!schemaConfig) {
     return {
       database,
-      schema: actualSchema,
+      schema,
       table: tableInfo.name,
       type: tableInfo.type,
       isAccessible: false,
-      accessDeniedReason: `Schema '${actualSchema}' is not configured for query access in database '${database}'`,
+      accessDeniedReason: `Schema '${schema}' is not configured for query access in database '${database}'`,
     };
   }
 
-  const { tableConfig, columnAccess } = schemaConfig;
-
-  // Use actual table name from DB result, or fall back to input parameter
-  const actualTableName = tableInfo.name || table;
-
-  // Check if table is accessible
-  const tableAccessResult = isTableAccessible(actualTableName, tableConfig);
-
-  if (!tableAccessResult.accessible) {
+  const tableAccess = isTableAccessible(tableInfo.name, schemaConfig.tableConfig);
+  if (!tableAccess.accessible) {
     return {
       database,
-      schema: actualSchema,
-      table: actualTableName,
-      type: tableInfo.type || 'TABLE',
+      schema,
+      table: tableInfo.name,
+      type: tableInfo.type,
       isAccessible: false,
-      accessDeniedReason: tableAccessResult.reason,
+      accessDeniedReason: tableAccess.reason,
     };
   }
 
-  // Annotate columns with access status
   const { annotatedColumns, mode } = annotateColumnsWithAccess(
     tableInfo.columns,
-    actualTableName,
-    columnAccess
+    tableInfo.name,
+    schemaConfig.columnAccess,
   );
 
-  const accessibleCount = annotatedColumns.filter((c) => c.isAccessible).length;
-
-  const result: AccessibleTableInfo = {
+  return {
     database,
-    schema: actualSchema,
-    table: actualTableName,
-    type: tableInfo.type || 'TABLE',
+    schema,
+    table: tableInfo.name,
+    type: tableInfo.type,
     isAccessible: true,
+    columnAccessMode: mode,
     columns: annotatedColumns,
-    accessibleColumnCount: accessibleCount,
+    indexes: tableInfo.indexes,
+    foreignKeys: tableInfo.foreignKeys,
+    accessibleColumnCount: annotatedColumns.filter((column) => column.isAccessible).length,
     totalColumnCount: annotatedColumns.length,
   };
-
-  if (mode) {
-    result.columnAccessMode = mode;
-  }
-
-  // Include indexes and foreign keys if available
-  if (tableInfo.indexes) {
-    result.indexes = tableInfo.indexes.map((idx: any) => ({
-      name: idx.name,
-      type: idx.type,
-      isUnique: idx.isUnique,
-      isPrimaryKey: idx.isPrimaryKey,
-      columns: idx.columns,
-    }));
-  }
-
-  if (tableInfo.foreignKeys) {
-    result.foreignKeys = tableInfo.foreignKeys.map((fk: any) => ({
-      constraintName: fk.constraintName,
-      fromColumns: fk.fromColumns,
-      toSchema: fk.toSchema,
-      toTable: fk.toTable,
-      toColumns: fk.toColumns,
-    }));
-  }
-
-  return result;
 }

@@ -14,12 +14,11 @@ import {
   ParsedQueryInfo,
   QualifiedTableRef,
   QualifiedColumnRef,
-} from "../security/types.js";
+} from "./security/types.js";
 import { logger } from "./logger.js";
 
-// Initialize parser with T-SQL (SQL Server) dialect
 const parser = new Parser();
-const PARSER_OPTIONS = { database: "TransactSQL" };
+const PARSER_OPTIONS = { database: "MySQL" };
 
 /**
  * Parse a SQL query and extract tables, columns, and SELECT * usage
@@ -42,7 +41,7 @@ export function parseQuery(sql: string, database: string): ParsedQueryInfo {
 
     for (const stmt of statements) {
       if (stmt && stmt.type === "select") {
-        processSelectStatement(stmt, database, "dbo", result);
+        processSelectStatement(stmt, database, database, result);
       }
     }
   } catch (error: any) {
@@ -446,10 +445,10 @@ function parseQueryWithRegex(sql: string, database: string): ParsedQueryInfo {
   // Also handles RECURSIVE: WITH RECURSIVE name AS (...)
   const cteNames = new Set<string>();
   const ctePattern =
-    /(?:WITH\s+(?:RECURSIVE\s+)?|,\s*)(\[?[\w]+\]?)\s+AS\s*\(/gi;
+    /(?:WITH\s+(?:RECURSIVE\s+)?|,\s*)(`?[\w]+`?)\s+AS\s*\(/gi;
   let match;
   while ((match = ctePattern.exec(normalizedSql)) !== null) {
-    const cteName = match[1].replace(/[\[\]]/g, "").toLowerCase();
+    const cteName = match[1].replace(/`/g, "").toLowerCase();
     cteNames.add(cteName);
     logger.debug(`Regex parser found CTE name: ${cteName}`);
   }
@@ -473,7 +472,7 @@ function parseQueryWithRegex(sql: string, database: string): ParsedQueryInfo {
     // Handle schema.table format
     const tableParts = tableName.split(".");
     const table = tableParts.length > 1 ? tableParts[1] : tableParts[0];
-    const schema = tableParts.length > 1 ? tableParts[0] : "dbo";
+    const schema = tableParts.length > 1 ? tableParts[0] : database;
 
     // Skip if this is a CTE name
     if (cteNames.has(table.toLowerCase())) {
@@ -503,21 +502,21 @@ function parseQueryWithRegex(sql: string, database: string): ParsedQueryInfo {
   };
 
   // Extract tables from FROM clause (basic pattern)
-  const fromPattern = /FROM\s+(\[?[\w.]+\]?(?:\s+(?:AS\s+)?[\w]+)?)/gi;
+  const fromPattern = /FROM\s+(`?[\w.]+`?(?:\s+(?:AS\s+)?[\w]+)?)/gi;
   while ((match = fromPattern.exec(normalizedSql)) !== null) {
     const tableExpr = match[1].trim();
     const parts = tableExpr.split(/\s+/);
-    const tableName = parts[0].replace(/[\[\]]/g, "");
+    const tableName = parts[0].replace(/`/g, "");
     const alias = parts.length > 1 ? parts[parts.length - 1] : undefined;
     addTableRef(tableName, alias);
   }
 
   // Extract tables from JOIN clauses
-  const joinPattern = /JOIN\s+(\[?[\w.]+\]?(?:\s+(?:AS\s+)?[\w]+)?)/gi;
+  const joinPattern = /JOIN\s+(`?[\w.]+`?(?:\s+(?:AS\s+)?[\w]+)?)/gi;
   while ((match = joinPattern.exec(normalizedSql)) !== null) {
     const tableExpr = match[1].trim();
     const parts = tableExpr.split(/\s+/);
-    const tableName = parts[0].replace(/[\[\]]/g, "");
+    const tableName = parts[0].replace(/`/g, "");
     const alias = parts.length > 1 ? parts[parts.length - 1] : undefined;
     addTableRef(tableName, alias);
   }
@@ -553,18 +552,18 @@ export function extractTableNames(sql: string): string[] {
   const normalizedSql = sql.replace(/\s+/g, " ").trim();
 
   // FROM clause
-  const fromMatch = normalizedSql.match(/FROM\s+(\[?[\w.]+\]?)/i);
+  const fromMatch = normalizedSql.match(/FROM\s+(`?[\w.]+`?)/i);
   if (fromMatch) {
-    const tableName = fromMatch[1].replace(/[\[\]]/g, "");
+    const tableName = fromMatch[1].replace(/`/g, "");
     const parts = tableName.split(".");
     tables.push(parts[parts.length - 1]);
   }
 
   // JOIN clauses
-  const joinPattern = /JOIN\s+(\[?[\w.]+\]?)/gi;
+  const joinPattern = /JOIN\s+(`?[\w.]+`?)/gi;
   let match;
   while ((match = joinPattern.exec(normalizedSql)) !== null) {
-    const tableName = match[1].replace(/[\[\]]/g, "");
+    const tableName = match[1].replace(/`/g, "");
     const parts = tableName.split(".");
     tables.push(parts[parts.length - 1]);
   }

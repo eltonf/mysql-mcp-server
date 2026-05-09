@@ -65,9 +65,9 @@ export interface AccessValidationResult {
 // Fully qualified table reference (extracted from parsed SQL)
 export interface QualifiedTableRef {
   database: string; // From execute_query args
-  schema: string; // From SQL or default 'dbo'
+  schema: string; // From SQL or configured database/schema default
   table: string; // Table name
-  alias?: string; // If aliased (e.g., Player p → alias='p')
+  alias?: string; // If aliased (e.g., customers c -> alias='c')
 }
 
 // Column reference with table context

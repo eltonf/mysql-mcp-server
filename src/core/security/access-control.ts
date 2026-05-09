@@ -16,8 +16,8 @@ import {
   QualifiedColumnRef,
 } from "./types.js";
 import { getTableConfigForSchema } from "./config-loader.js";
-import { parseQuery } from "../utils/sql-parser.js";
-import { logger } from "../utils/logger.js";
+import { parseQuery } from "../sql-parser.js";
+import { logger } from "../logger.js";
 
 /**
  * Validate a query against access control configuration
@@ -110,7 +110,7 @@ function validateSelectStar(selectStarTables: string[]): AccessViolation[] {
         type: "select_star",
         message:
           "SELECT * is not allowed. All SELECT statements must explicitly list columns. " +
-          "Example: SELECT Name, TeamID FROM Player",
+          "Example: SELECT name, email FROM customers",
       });
     } else {
       violations.push({

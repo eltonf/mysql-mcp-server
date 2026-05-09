@@ -1,20 +1,20 @@
 {
-  "name": "sql-server-mcp",
+  "name": "mysql-mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for SQL Server schema introspection and query generation",
+  "description": "MCP server for MySQL schema introspection and guarded read-only queries",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "test": "jest",
+    "test": "npm run build && node --test dist/**/*.test.js",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts"
   },
   "keywords": [
     "mcp",
-    "sql-server",
+    "mysql",
     "database",
     "schema",
     "ai"
@@ -23,20 +23,17 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "mssql": "^11.0.1",
+    "dotenv": "^16.4.7",
+    "mysql2": "^3.12.0",
     "node-sql-parser": "^5.3.6",
-    "zod": "^3.24.1",
     "winston": "^3.17.0",
-    "dotenv": "^16.4.7"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@types/mssql": "^9.1.5",
     "@types/node": "^22.10.5",
     "@typescript-eslint/eslint-plugin": "^8.20.0",
     "@typescript-eslint/parser": "^8.20.0",
     "eslint": "^9.18.0",
-    "jest": "^29.7.0",
-    "nodemon": "^3.1.9",
     "prettier": "^3.4.2",
     "typescript": "^5.7.2"
   },

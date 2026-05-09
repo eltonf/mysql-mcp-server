@@ -14,7 +14,7 @@ import {
   SchemaConfig,
   ColumnAccessPolicy,
 } from './types.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '../logger.js';
 
 // Environment variable for config file path
 const CONFIG_ENV_VAR = 'QUERY_ACCESS_CONFIG';

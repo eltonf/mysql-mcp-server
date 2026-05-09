@@ -1,115 +1,66 @@
-import { db } from '../db/connection.js';
-import { logger } from '../utils/logger.js';
+import { appConfig, resolveDatabase } from '../core/config.js';
+import { logger } from '../core/logger.js';
 import {
-  validateQuerySafety,
-  enforceRowLimit,
-  buildDataQuerySQL,
   QueryModificationResult,
-} from '../db/queries.js';
+  enforceRowLimit,
+  validateQuerySafety,
+} from '../core/query-safety.js';
 import {
-  validateQueryAccess,
   getAccessControlConfig,
   isAccessControlInitialized,
-} from '../security/access-control.js';
+  validateQueryAccess,
+} from '../core/security/access-control.js';
+import { db } from '../mysql/connection.js';
 
-// Get max rows from environment or default to 100
-const MAX_QUERY_ROWS = parseInt(process.env.MAX_QUERY_ROWS || '100', 10);
-// Note: QUERY_TIMEOUT_MS is available for future use with mssql request.timeout()
-// const QUERY_TIMEOUT_MS = parseInt(process.env.QUERY_TIMEOUT_MS || '30000', 10);
-
-/**
- * Result from data query execution
- */
 export interface DataQueryResult {
   originalQuery: string;
   executedQuery: string;
   wasModified: boolean;
   modifications: string[];
-  rows: any[];
+  rows: unknown[];
   rowCount: number;
   executionTimeMs: number;
   limitReached: boolean;
   columnNames?: string[];
 }
 
-/**
- * Execute a SELECT query with safety controls
- * - Validates query is SELECT-only
- * - Enforces row limit (TOP clause)
- * - Returns detailed modification info
- */
 export async function executeQuery(args: {
-  database: string;
+  database?: string;
   query: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 }): Promise<DataQueryResult> {
-  const { database, query, parameters } = args;
+  const database = resolveDatabase(args.database);
   const startTime = Date.now();
 
-  logger.info(`Executing query on database: ${database}`);
-  logger.debug(`Original query: ${query}`);
+  logger.info(`Executing read query on database: ${database}`);
 
-  try {
-    // Step 1: Validate query safety (SELECT-only)
-    validateQuerySafety(query);
-    logger.debug('Query passed safety validation');
+  validateQuerySafety(args.query);
 
-    // Step 1.5: Validate access control (REQUIRED - restrictive by default)
-    if (!isAccessControlInitialized()) {
-      throw new Error(
-        'Access control not configured. Data queries are blocked until QUERY_ACCESS_CONFIG is set. ' +
-        'Create a query access config file and set QUERY_ACCESS_CONFIG environment variable to enable queries.'
-      );
-    }
-    const accessConfig = getAccessControlConfig();
-    validateQueryAccess(query, database, accessConfig);
-    logger.debug('Query passed access control validation');
-
-    // Step 2: Enforce row limit
-    const modResult: QueryModificationResult = enforceRowLimit(query, MAX_QUERY_ROWS);
-    logger.debug(`Query modification result: ${JSON.stringify({
-      wasModified: modResult.wasModified,
-      modifications: modResult.modifications,
-    })}`);
-
-    // Step 3: Wrap with database context
-    const finalQuery = buildDataQuerySQL(database, modResult.modifiedQuery);
-    logger.debug(`Final query with USE statement: ${finalQuery}`);
-
-    // Step 4: Execute query with timeout
-    const result = await db.query(finalQuery, parameters);
-    const endTime = Date.now();
-    const executionTimeMs = endTime - startTime;
-
-    // Step 5: Extract results
-    const rows = result.recordset || [];
-    const rowCount = rows.length;
-
-    // Determine if we hit the limit (means there might be more data)
-    const limitReached = rowCount === modResult.appliedTopValue;
-
-    // Extract column names from first row if available
-    const columnNames = rows.length > 0 ? Object.keys(rows[0]) : [];
-
-    logger.info(`Query executed successfully: ${rowCount} rows returned in ${executionTimeMs}ms`);
-
-    return {
-      originalQuery: query,
-      executedQuery: modResult.modifiedQuery,
-      wasModified: modResult.wasModified,
-      modifications: modResult.modifications,
-      rows,
-      rowCount,
-      executionTimeMs,
-      limitReached,
-      columnNames,
-    };
-  } catch (error: any) {
-    const executionTimeMs = Date.now() - startTime;
-    logger.error(`Query execution failed after ${executionTimeMs}ms:`, error);
-
-    // Re-throw with more context
-    const errorMessage = error.message || String(error);
-    throw new Error(`Query execution failed: ${errorMessage}`);
+  if (!isAccessControlInitialized()) {
+    throw new Error(
+      'Access control not configured. Data queries are blocked until QUERY_ACCESS_CONFIG is set.',
+    );
   }
+
+  validateQueryAccess(args.query, database, getAccessControlConfig());
+
+  const modResult: QueryModificationResult = enforceRowLimit(
+    args.query,
+    appConfig.query.maxRows,
+  );
+
+  const rows = await db.query<any>(modResult.modifiedQuery, args.parameters);
+  const executionTimeMs = Date.now() - startTime;
+
+  return {
+    originalQuery: args.query,
+    executedQuery: modResult.modifiedQuery,
+    wasModified: modResult.wasModified,
+    modifications: modResult.modifications,
+    rows,
+    rowCount: rows.length,
+    executionTimeMs,
+    limitReached: rows.length === modResult.appliedLimitValue,
+    columnNames: rows.length ? Object.keys(rows[0]) : [],
+  };
 }
