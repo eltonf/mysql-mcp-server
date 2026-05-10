@@ -7,7 +7,7 @@ Add this to your Claude Desktop MCP configuration:
   "mcpServers": {
     "mysql": {
       "command": "npx",
-      "args": ["-y", "mysql-mcp-server"],
+      "args": ["-y", "/mysql-mcp-server"],
       "env": {
         "DATABASE_URL": "mysql://mcp_reader:password@localhost:3306/app_db",
         "SCHEMA_ONLY_MODE": "true"

@@ -81,7 +81,7 @@ Replace the sample DATABASE_URL with your real MySQL connection string.
 \`\`\`bash
 claude mcp add --transport stdio mysql \\
   --env DATABASE_URL=${DEFAULT_DATABASE_URL} \\
-  -- npx -y mysql-mcp-server
+  -- npx -y /mysql-mcp-server
 \`\`\`
 
 ## Codex
@@ -89,7 +89,7 @@ claude mcp add --transport stdio mysql \\
 \`\`\`bash
 codex mcp add mysql \\
   --env DATABASE_URL=${DEFAULT_DATABASE_URL} \\
-  -- npx -y mysql-mcp-server
+  -- npx -y /mysql-mcp-server
 \`\`\`
 
 ## Claude Desktop
@@ -99,7 +99,7 @@ codex mcp add mysql \\
   "mcpServers": {
     "mysql": {
       "command": "npx",
-      "args": ["-y", "mysql-mcp-server"],
+      "args": ["-y", "/mysql-mcp-server"],
       "env": {
         "DATABASE_URL": "${DEFAULT_DATABASE_URL}"
       }
@@ -116,7 +116,7 @@ codex mcp add mysql \\
   "mcp": {
     "mysql": {
       "type": "local",
-      "command": ["npx", "-y", "mysql-mcp-server"],
+      "command": ["npx", "-y", "/mysql-mcp-server"],
       "enabled": true,
       "environment": {
         "DATABASE_URL": "${DEFAULT_DATABASE_URL}"

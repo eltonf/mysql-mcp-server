@@ -5,7 +5,7 @@ Add the server as a local stdio MCP:
 ```bash
 codex mcp add mysql \
   --env DATABASE_URL=mysql://mcp_reader:password@localhost:3306/app_db \
-  -- npx -y mysql-mcp-server
+  -- npx -y /mysql-mcp-server
 ```
 
 Verify:

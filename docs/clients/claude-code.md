@@ -5,7 +5,7 @@ Add the server as a local stdio MCP:
 ```bash
 claude mcp add --transport stdio mysql \
   --env DATABASE_URL=mysql://mcp_reader:password@localhost:3306/app_db \
-  -- npx -y mysql-mcp-server
+  -- npx -y /mysql-mcp-server
 ```
 
 For read-query support, also pass:

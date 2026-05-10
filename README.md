@@ -21,13 +21,13 @@ An open-source Model Context Protocol (MCP) server for MySQL schema introspectio
 Fast path for users installing from npm:
 
 ```bash
-npx -y mysql-mcp-server init
+npx -y /mysql-mcp-server init
 ```
 
 Then edit `.env` and check the connection:
 
 ```bash
-npx -y mysql-mcp-server doctor
+npx -y /mysql-mcp-server doctor
 ```
 
 Local development from this repository:
@@ -78,7 +78,7 @@ Client-specific docs:
   "mcpServers": {
     "mysql": {
       "command": "npx",
-      "args": ["-y", "mysql-mcp-server"],
+      "args": ["-y", "/mysql-mcp-server"],
       "env": {
         "DATABASE_URL": "mysql://mcp_reader:change_me@localhost:3306/app_db",
         "SCHEMA_ONLY_MODE": "true"
