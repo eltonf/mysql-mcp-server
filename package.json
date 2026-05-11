@@ -1,6 +1,6 @@
 {
   "name": "@sigma4life/mysql-mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for MySQL schema introspection and guarded read-only queries",
   "main": "dist/index.js",
   "bin": {
@@ -45,5 +45,13 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eltonf/mysql-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eltonf/mysql-mcp-server/issues"
+  },
+  "homepage": "https://github.com/eltonf/mysql-mcp-server#readme"
 }
