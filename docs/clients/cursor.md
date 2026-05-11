@@ -7,7 +7,7 @@ Create or update `~/.cursor/mcp.json`:
   "mcpServers": {
     "mysql": {
       "command": "npx",
-      "args": ["-y", "/mysql-mcp-server"],
+      "args": ["-y", "@sigma4life/mysql-mcp-server"],
       "env": {
         "DATABASE_URL": "mysql://mcp_reader:password@localhost:3306/app_db",
         "SCHEMA_ONLY_MODE": "true"

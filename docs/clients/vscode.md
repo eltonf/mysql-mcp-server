@@ -8,7 +8,7 @@ Create `.vscode/mcp.json` in your project:
     "mysql": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "/mysql-mcp-server"],
+      "args": ["-y", "@sigma4life/mysql-mcp-server"],
       "env": {
         "DATABASE_URL": "mysql://mcp_reader:password@localhost:3306/app_db",
         "SCHEMA_ONLY_MODE": "true"

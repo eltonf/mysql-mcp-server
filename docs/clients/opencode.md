@@ -8,7 +8,7 @@ Add a local MCP server to `opencode.json`:
   "mcp": {
     "mysql": {
       "type": "local",
-      "command": ["npx", "-y", "/mysql-mcp-server"],
+      "command": ["npx", "-y", "@sigma4life/mysql-mcp-server"],
       "enabled": true,
       "environment": {
         "DATABASE_URL": "mysql://mcp_reader:password@localhost:3306/app_db",
